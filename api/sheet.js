@@ -11,16 +11,20 @@ export default async function handler(req, res) {
     let response;
     if (req.method === "GET") {
       const action = req.query.action || "read";
-      response = await fetch(`${SCRIPT_URL}?action=${action}`);
+      response = await fetch(`${SCRIPT_URL}?action=${action}`, { redirect: "follow" });
     } else {
-      response = await fetch(SCRIPT_URL, {
-        method: "POST",
-        body: JSON.stringify(req.body),
-        headers: { "Content-Type": "application/json" }
-      });
+      const body = req.body;
+      const params = new URLSearchParams();
+      params.append("action", body.action);
+      Object.keys(body).forEach(k => { if (k !== "action") params.append(k, body[k]); });
+      response = await fetch(`${SCRIPT_URL}?${params.toString()}`, { redirect: "follow" });
     }
-    const data = await response.json();
-    res.status(200).json(data);
+    const text = await response.text();
+    try {
+      res.status(200).json(JSON.parse(text));
+    } catch {
+      res.status(200).send(text);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
