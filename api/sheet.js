@@ -8,23 +8,20 @@ export default async function handler(req, res) {
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyulP43RWyq8kkpDudVtGPyZLZZgNStaswZMIlKd-49SUoMWOAJjITbwMPwfQtaFgXy/exec";
 
   try {
-    let response;
+    let url = SCRIPT_URL;
+    let options = { redirect: "follow" };
+
     if (req.method === "GET") {
-      const action = req.query.action || "read";
-      response = await fetch(`${SCRIPT_URL}?action=${action}`, { redirect: "follow" });
+      url += `?action=${req.query.action || "read"}`;
     } else {
-      const body = req.body;
-      const params = new URLSearchParams();
-      params.append("action", body.action);
-      Object.keys(body).forEach(k => { if (k !== "action") params.append(k, body[k]); });
-      response = await fetch(`${SCRIPT_URL}?${params.toString()}`, { redirect: "follow" });
+      const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+      const params = new URLSearchParams(body);
+      url += `?${params.toString()}`;
     }
+
+    const response = await fetch(url, options);
     const text = await response.text();
-    try {
-      res.status(200).json(JSON.parse(text));
-    } catch {
-      res.status(200).send(text);
-    }
+    res.status(200).send(text);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
