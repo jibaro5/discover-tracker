@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyulP43RWyq8kkpDudVtGPyZLZZgNStaswZMIlKd-49SUoMWOAJjITbwMPwfQtaFgXy/exec";
+const SCRIPT_URL = "/api/sheet";
 const CATEGORIES = ["🍽️ Comida","🛒 Super","⛽ Gas","🎬 Ocio","✈️ Viaje","🏥 Salud","🛍️ Compras","📦 Otro"];
 function today() { return new Date().toISOString().slice(0,10); }
 function fmt(n) { return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(n||0); }
