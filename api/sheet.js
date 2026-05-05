@@ -8,15 +8,12 @@ export default async function handler(req, res) {
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyulP43RWyq8kkpDudVtGPyZLZZgNStaswZMIlKd-49SUoMWOAJjITbwMPwfQtaFgXy/exec";
 
   try {
-    const action = req.method === "GET" 
-      ? (req.query.action || "read")
-      : (req.body?.action || "read");
-
-    const url = `${SCRIPT_URL}?action=${encodeURIComponent(action)}`;
-    
-    const response = await fetch(url, { redirect: "follow" });
+    const response = await fetch(`${SCRIPT_URL}?action=read`, {
+      method: "GET",
+      redirect: "follow",
+      headers: { "Accept": "application/json" }
+    });
     const text = await response.text();
-    
     try { res.status(200).json(JSON.parse(text)); }
     catch { res.status(200).send(text); }
   } catch (err) {
