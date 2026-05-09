@@ -12,6 +12,7 @@ async function sheetRead() {
   const data = await res.json();
   return data.expenses || [];
 }
+
 async function sheetAppend(expense) {
   const owedStr = (expense.owed||[]).map(p => {
     const amt = p.type === "pct"
@@ -22,16 +23,26 @@ async function sheetAppend(expense) {
   await fetch(SCRIPT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action:"append", desc:expense.desc, amount:expense.amount, date:expense.date, category:"", owed:owedStr }),
+    body: JSON.stringify({ action:"append", desc:expense.desc, amount:expense.amount, date:expense.date, owed:owedStr }),
   });
 }
-async function sheetUpdate(expense) {
+
+async function sheetUpdateStatus(expense) {
   await fetch(SCRIPT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action:"update", id:expense.sheetId, desc:expense.desc, date:expense.date, amount:expense.amount, added:String(expense.added) }),
+    body: JSON.stringify({
+      action: "update",
+      id: expense.sheetId,
+      desc: expense.desc,
+      date: expense.date,
+      amount: expense.amount,
+      added: String(expense.added),
+      paid: String(expense.paid),
+    }),
   });
 }
+
 async function sheetDelete(expense) {
   await fetch(SCRIPT_URL, {
     method: "POST",
@@ -79,6 +90,7 @@ export default function App() {
         date: e.date||today(),
         owed: typeof e.owed==="string" ? parseOwedStr(e.owed) : (e.owed||[]),
         added: e.added===true||e.added==="SI",
+        paid: e.paid===true||e.paid==="SI",
       }));
       setExpenses(normalized);
       setStatus("ok");
@@ -115,6 +127,7 @@ export default function App() {
       date: form.date,
       owed: form.owed.filter(p=>p.value),
       added: editId ? (expenses.find(x=>x.id===editId)?.added??false) : false,
+      paid: editId ? (expenses.find(x=>x.id===editId)?.paid??false) : false,
     };
     if (editId) {
       setExpenses(ex=>ex.map(x=>x.id===editId?expense:x));
@@ -131,12 +144,12 @@ export default function App() {
     descRef.current?.focus();
   }
 
-  async function toggleAdded(id) {
-    const updated = expenses.map(x=>x.id===id?{...x,added:!x.added}:x);
+  async function toggleField(id, field) {
+    const updated = expenses.map(x=>x.id===id?{...x,[field]:!x[field]}:x);
     setExpenses(updated);
     const exp = updated.find(x=>x.id===id);
     setSyncing(true);
-    try { await sheetUpdate(exp); }
+    try { await sheetUpdateStatus(exp); }
     catch {}
     setSyncing(false);
   }
@@ -164,8 +177,9 @@ export default function App() {
 
   const pending = expenses.filter(e=>!e.added);
   const totalCard = pending.reduce((s,e)=>s+e.amount,0);
-  const totalOwed = pending.reduce((s,e)=>s+owedForExp(e),0);
-  const netPending = totalCard - totalOwed;
+  // Me deben: only count if not paid yet
+  const totalOwed = expenses.filter(e=>!e.paid).reduce((s,e)=>s+owedForExp(e),0);
+  const netPending = totalCard - expenses.filter(e=>!e.added).reduce((s,e)=>s+owedForExp(e),0);
   const statusDot = status==="ok" ? "#059669" : status==="error" ? "#dc2626" : "#94a3b8";
 
   return (
@@ -192,9 +206,11 @@ export default function App() {
         .pto.on{background:#0f4c81;color:#fff;}
         .row{display:flex;align-items:flex-start;gap:10px;padding:14px 16px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;margin-bottom:8px;transition:all .2s;box-shadow:0 1px 3px rgba(0,0,0,.04);}
         .row:hover{border-color:#cbd5e1;box-shadow:0 2px 8px rgba(0,0,0,.07);}
-        .row.dim{opacity:.45;}
-        .chk{width:22px;height:22px;border-radius:6px;border:2px solid #cbd5e1;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;margin-top:1px;}
-        .chk.on{background:#059669;border-color:#059669;}
+        .row.dim{opacity:.4;}
+        .chk{width:22px;height:22px;border-radius:6px;border:2px solid #cbd5e1;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;}
+        .chk:hover{border-color:#94a3b8;}
+        .chk.blue.on{background:#0f4c81;border-color:#0f4c81;}
+        .chk.green.on{background:#059669;border-color:#059669;}
         .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:10px;font-size:13px;z-index:999;animation:pop .2s ease;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.12);}
         .tok{background:#059669;color:#fff;}
         .twarn{background:#dc2626;color:#fff;}
@@ -208,10 +224,9 @@ export default function App() {
         .modal{background:#fff;border-radius:16px;padding:28px;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.15);}
         .card{background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,.05);}
         @media(max-width:640px){
-          .stats-grid{grid-template-columns:1fr!important;}
-          .form-grid-2{grid-template-columns:1fr!important;}
-          .header-row{flex-direction:column;gap:12px!important;}
-          .main-wrap{padding:16px!important;}
+          .stats-grid{grid-template-columns:1fr 1fr!important;}
+          .form-row{grid-template-columns:1fr!important;}
+          .header-inner{flex-direction:column;gap:10px!important;align-items:flex-start!important;}
         }
       `}</style>
 
@@ -221,10 +236,7 @@ export default function App() {
           <div className="modal" onClick={e=>e.stopPropagation()}>
             <div style={{fontSize:11,letterSpacing:2,color:"#dc2626",marginBottom:12,fontWeight:600}}>CONFIRMAR ELIMINACIÓN</div>
             <div style={{fontSize:15,marginBottom:4,fontWeight:500}}>{confirmDelete.desc}</div>
-            <div style={{fontSize:13,color:"#64748b",marginBottom:6}}>{fmt(confirmDelete.amount)} · {confirmDelete.date}</div>
-            <div style={{fontSize:12,color:"#94a3b8",marginBottom:24,lineHeight:1.6}}>
-              Se borrará de la app y de tu Google Sheet.
-            </div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:20}}>{fmt(confirmDelete.amount)} · {confirmDelete.date}</div>
             <div style={{display:"flex",gap:8}}>
               <button className="btn btn-danger" style={{flex:1,padding:"10px"}} onClick={doDelete}>Sí, eliminar</button>
               <button className="btn btn-ghost" onClick={()=>setConfirmDelete(null)}>Cancelar</button>
@@ -234,22 +246,22 @@ export default function App() {
       )}
 
       {/* Top bar */}
-      <div style={{background:"#fff",borderBottom:"1.5px solid #e2e8f0",padding:"0 24px"}}>
-        <div style={{maxWidth:720,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",height:60}} className="header-row">
+      <div style={{background:"#fff",borderBottom:"1.5px solid #e2e8f0",padding:"0 24px",position:"sticky",top:0,zIndex:100}}>
+        <div style={{maxWidth:720,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",height:60}} className="header-inner">
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:32,height:32,background:"#0f4c81",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center"}}>
-              <span style={{color:"#fff",fontSize:16}}>◈</span>
+            <div style={{width:34,height:34,background:"#0f4c81",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <span style={{color:"#fff",fontSize:17}}>◈</span>
             </div>
             <div>
-              <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,letterSpacing:-.3,color:"#0f172a"}}>Discover</div>
-              <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,marginTop:-1}}>CONTROL DE GASTOS</div>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,letterSpacing:-.3}}>Discover</div>
+              <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1.5,marginTop:-2}}>CONTROL DE GASTOS</div>
             </div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             {syncing && <span style={{fontSize:11,color:"#94a3b8"}} className="pulse">Guardando...</span>}
             <div style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#64748b"}}>
-              <span style={{width:6,height:6,borderRadius:"50%",background:statusDot,display:"inline-block"}}></span>
-              Budget Personal
+              <span style={{width:7,height:7,borderRadius:"50%",background:statusDot,display:"inline-block"}}></span>
+              Sheet
             </div>
             <button className="btn btn-ghost btn-sm" onClick={loadSheet} disabled={loading}>
               {loading ? <span className="spin">⟳</span> : "⟳"} Sync
@@ -258,24 +270,24 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{maxWidth:720,margin:"0 auto",padding:"24px 20px"}} className="main-wrap">
+      <div style={{maxWidth:720,margin:"0 auto",padding:"24px 20px 60px"}}>
 
         {/* Stats */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:24}} className="stats-grid">
           <div className="card">
-            <div style={{fontSize:10,letterSpacing:2,color:"#94a3b8",marginBottom:6,fontWeight:600}}>A TARJETA</div>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,fontWeight:700,color:"#0f4c81"}}>{fmt(totalCard)}</div>
-            <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>pendiente</div>
+            <div style={{fontSize:9,letterSpacing:2,color:"#94a3b8",marginBottom:6,fontWeight:600}}>A TARJETA</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:"#0f4c81"}}>{fmt(totalCard)}</div>
+            <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>por ingresar</div>
           </div>
           <div className="card">
-            <div style={{fontSize:10,letterSpacing:2,color:"#94a3b8",marginBottom:6,fontWeight:600}}>ME DEBEN</div>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,fontWeight:700,color:"#b45309"}}>{fmt(totalOwed)}</div>
-            <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>compartidos</div>
+            <div style={{fontSize:9,letterSpacing:2,color:"#94a3b8",marginBottom:6,fontWeight:600}}>ME DEBEN</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:"#b45309"}}>{fmt(totalOwed)}</div>
+            <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>sin cobrar</div>
           </div>
           <div className="card">
-            <div style={{fontSize:10,letterSpacing:2,color:"#94a3b8",marginBottom:6,fontWeight:600}}>COSTO NETO</div>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,fontWeight:700,color:"#059669"}}>{fmt(netPending)}</div>
-            <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>real</div>
+            <div style={{fontSize:9,letterSpacing:2,color:"#94a3b8",marginBottom:6,fontWeight:600}}>COSTO NETO</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:"#059669"}}>{fmt(netPending)}</div>
+            <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>real tuyo</div>
           </div>
         </div>
 
@@ -285,7 +297,7 @@ export default function App() {
             {editId ? "✏️  EDITANDO GASTO" : "+ NUEVO GASTO"}
           </div>
           <form onSubmit={submitForm}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 120px",gap:10,marginBottom:10}} className="form-grid-2">
+            <div style={{display:"grid",gridTemplateColumns:"1fr 120px",gap:10,marginBottom:10}} className="form-row">
               <input ref={descRef} className="inp" placeholder="Descripción" value={form.desc}
                 onChange={e=>setForm(f=>({...f,desc:e.target.value}))} required />
               <input className="inp" type="number" placeholder="$ Total" value={form.amount}
@@ -297,15 +309,15 @@ export default function App() {
             </div>
 
             {/* Me deben */}
-            <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+            <div style={{background:"#fffbeb",border:"1.5px solid #fde68a",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
                 <div>
                   <span style={{fontSize:11,letterSpacing:1.5,color:"#b45309",fontWeight:600}}>ME DEBEN </span>
-                  <span style={{fontSize:11,color:"#94a3b8"}}>(el total va a la tarjeta)</span>
+                  <span style={{fontSize:11,color:"#92400e"}}>— el total completo va a tu tarjeta</span>
                 </div>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={addPerson}>+ persona</button>
               </div>
-              {form.owed.length===0 && <div style={{fontSize:12,color:"#94a3b8"}}>Nadie te debe en este gasto.</div>}
+              {form.owed.length===0 && <div style={{fontSize:12,color:"#92400e",opacity:.6}}>Nadie te debe en este gasto.</div>}
               {form.owed.map((p,i)=>(
                 <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
                   <input className="inp" placeholder="Nombre" value={p.name}
@@ -322,9 +334,9 @@ export default function App() {
                 </div>
               ))}
               {form.owed.length>0 && form.amount && (
-                <div style={{marginTop:12,display:"flex",gap:20,fontSize:12,padding:"10px 0 2px"}}>
-                  <span style={{color:"#64748b"}}>Cobras: <strong style={{color:"#b45309"}}>{fmt(owedTotalFromForm())}</strong></span>
-                  <span style={{color:"#64748b"}}>Tu parte: <strong style={{color:"#059669"}}>{fmt(Math.max(0,parseFloat(form.amount)-owedTotalFromForm()))}</strong></span>
+                <div style={{marginTop:12,display:"flex",gap:20,fontSize:12,paddingTop:8,borderTop:"1px solid #fde68a"}}>
+                  <span style={{color:"#92400e"}}>Cobras: <strong style={{color:"#b45309"}}>{fmt(owedTotalFromForm())}</strong></span>
+                  <span style={{color:"#92400e"}}>Tu parte: <strong style={{color:"#059669"}}>{fmt(Math.max(0,parseFloat(form.amount)-owedTotalFromForm()))}</strong></span>
                 </div>
               )}
             </div>
@@ -339,12 +351,28 @@ export default function App() {
         </div>
 
         {/* Filter */}
-        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:14}}>
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:16}}>
           <span style={{fontSize:11,color:"#94a3b8",letterSpacing:1,fontWeight:600}}>VER:</span>
           {[["all","Todos"],["pending","Pendientes"],["added","Ingresados"]].map(([v,l])=>(
             <button key={v} className={`tog ${filter===v?"on":""}`} onClick={()=>setFilter(v)}>{l}</button>
           ))}
           <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8"}}>{filtered.length} gastos</span>
+        </div>
+
+        {/* Legend */}
+        <div style={{display:"flex",gap:16,marginBottom:14,fontSize:11,color:"#94a3b8"}}>
+          <div style={{display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:16,height:16,borderRadius:4,background:"#0f4c81",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <span style={{color:"#fff",fontSize:10}}>✓</span>
+            </div>
+            Ingresado
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:16,height:16,borderRadius:4,background:"#059669",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <span style={{color:"#fff",fontSize:10}}>✓</span>
+            </div>
+            Me pagaron
+          </div>
         </div>
 
         {/* List */}
@@ -359,34 +387,77 @@ export default function App() {
               {expenses.length===0 ? "Presiona Sync para cargar tus gastos." : "Sin gastos aquí."}
             </div>
           )}
+
           {filtered.map(ex => {
             const owedAmt = owedForExp(ex);
+            const hasOwed = owedAmt > 0;
             return (
-              <div key={ex.id} className={`row ${ex.added?"dim":""}`}>
-                <div className={`chk ${ex.added?"on":""}`} onClick={()=>toggleAdded(ex.id)}>
-                  {ex.added && <span style={{fontSize:13,color:"#fff",fontWeight:600}}>✓</span>}
+              <div key={ex.id} className={`row ${ex.added&&(!hasOwed||ex.paid)?"dim":""}`}>
+                {/* Checkmarks */}
+                <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0,paddingTop:2}}>
+                  {/* Ingresado */}
+                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                    <div className={`chk blue ${ex.added?"on":""}`} onClick={()=>toggleField(ex.id,"added")}>
+                      {ex.added && <span style={{fontSize:12,color:"#fff",fontWeight:700}}>✓</span>}
+                    </div>
+                  </div>
+                  {/* Me pagaron — solo si hay monto que deben */}
+                  {hasOwed && (
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <div className={`chk green ${ex.paid?"on":""}`} onClick={()=>toggleField(ex.id,"paid")}>
+                        {ex.paid && <span style={{fontSize:12,color:"#fff",fontWeight:700}}>✓</span>}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                {/* Content */}
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:14,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ex.desc}</div>
-                  <div style={{fontSize:11,color:"#94a3b8",marginTop:3,display:"flex",flexWrap:"wrap",gap:8}}>
+                  <div style={{fontSize:11,color:"#94a3b8",marginTop:3,display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
                     <span>{ex.date}</span>
-                    {(ex.owed||[]).map((p,i)=>(
-                      <span key={i} style={{color:"#b45309",fontWeight:500}}>{p.name}: {fmt(p.value)}</span>
-                    ))}
+                    {hasOwed && !ex.paid && (
+                      <span style={{color:"#b45309",fontWeight:500,background:"#fffbeb",padding:"1px 6px",borderRadius:4,border:"1px solid #fde68a"}}>
+                        {(ex.owed||[]).map(p=>p.name).join(", ")} debe {fmt(owedAmt)}
+                      </span>
+                    )}
+                    {hasOwed && ex.paid && (
+                      <span style={{color:"#059669",fontWeight:500,background:"#f0fdf4",padding:"1px 6px",borderRadius:4,border:"1px solid #bbf7d0"}}>
+                        Cobrado {fmt(owedAmt)}
+                      </span>
+                    )}
                   </div>
                 </div>
+
+                {/* Amount */}
                 <div style={{textAlign:"right",flexShrink:0}}>
-                  <div style={{fontSize:15,fontWeight:600,color:"#0f172a"}}>{fmt(ex.amount)}</div>
-                  {owedAmt>0 && <div style={{fontSize:11,color:"#b45309"}}>cobras {fmt(owedAmt)}</div>}
-                  {owedAmt>0 && <div style={{fontSize:11,color:"#059669"}}>neto {fmt(ex.amount-owedAmt)}</div>}
+                  <div style={{fontSize:15,fontWeight:600}}>{fmt(ex.amount)}</div>
+                  {hasOwed && !ex.paid && <div style={{fontSize:11,color:"#b45309"}}>cobras {fmt(owedAmt)}</div>}
+                  {hasOwed && <div style={{fontSize:11,color:"#059669"}}>neto {fmt(ex.amount-owedAmt)}</div>}
                 </div>
-                <span style={{fontSize:10,padding:"3px 8px",borderRadius:20,flexShrink:0,fontWeight:500,
-                  border:`1.5px solid ${ex.added?"#d1fae5":"#fee2e2"}`,
-                  color:ex.added?"#059669":"#dc2626",
-                  background:ex.added?"#f0fdf4":"#fff5f5"}}>
-                  {ex.added?"Ingresado":"Pendiente"}
-                </span>
-                <div style={{display:"flex",gap:4,flexShrink:0}}>
+
+                {/* Status labels */}
+                <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
+                  <span style={{fontSize:9,padding:"2px 7px",borderRadius:20,fontWeight:600,
+                    border:`1px solid ${ex.added?"#bfdbfe":"#e2e8f0"}`,
+                    color:ex.added?"#0f4c81":"#94a3b8",
+                    background:ex.added?"#eff6ff":"#f8fafc",
+                    whiteSpace:"nowrap"}}>
+                    {ex.added?"✓ ingresado":"○ pendiente"}
+                  </span>
+                  {hasOwed && (
+                    <span style={{fontSize:9,padding:"2px 7px",borderRadius:20,fontWeight:600,
+                      border:`1px solid ${ex.paid?"#bbf7d0":"#fde68a"}`,
+                      color:ex.paid?"#059669":"#b45309",
+                      background:ex.paid?"#f0fdf4":"#fffbeb",
+                      whiteSpace:"nowrap"}}>
+                      {ex.paid?"✓ cobrado":"○ sin cobrar"}
+                    </span>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
                   <button className="btn btn-ghost btn-sm" onClick={()=>startEdit(ex)}>✏️</button>
                   <button className="btn btn-danger btn-sm" onClick={()=>setConfirmDelete(ex)}>🗑</button>
                 </div>
