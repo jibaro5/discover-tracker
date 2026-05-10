@@ -7,6 +7,11 @@ function today() { return new Date().toISOString().slice(0,10); }
 function fmt(n) { return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(n||0); }
 function parseAmt(s) { return parseFloat(String(s).replace(/[$,]/g,""))||0; }
 
+function calcOwedAmt(p, totalAmount) {
+  if (p.type === "pct") return (totalAmount * (parseFloat(p.value) || 0)) / 100;
+  return parseFloat(p.value) || 0;
+}
+
 async function sheetRead() {
   const res = await fetch(`${SCRIPT_URL}?action=read`);
   const data = await res.json();
@@ -15,10 +20,8 @@ async function sheetRead() {
 
 async function sheetAppend(expense) {
   const owedStr = (expense.owed||[]).map(p => {
-    const amt = p.type === "pct"
-      ? ((expense.amount * parseFloat(p.value)) / 100).toFixed(2)
-      : parseFloat(p.value).toFixed(2);
-    return `${p.name}: $${amt}`;
+    const amt = calcOwedAmt(p, expense.amount).toFixed(2);
+    return p.name ? `${p.name}: $${amt}` : `$${amt}`;
   }).join(", ");
   await fetch(SCRIPT_URL, {
     method: "POST",
@@ -33,10 +36,10 @@ async function sheetUpdateStatus(expense) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       action: "update",
-      id: expense.sheetId,
+      id: String(expense.sheetId),
       desc: expense.desc,
       date: expense.date,
-      amount: expense.amount,
+      amount: String(expense.amount),
       added: String(expense.added),
       paid: String(expense.paid),
     }),
@@ -47,16 +50,23 @@ async function sheetDelete(expense) {
   await fetch(SCRIPT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action:"delete", id:expense.sheetId, desc:expense.desc, date:expense.date, amount:expense.amount }),
+    body: JSON.stringify({ action:"delete", id:String(expense.sheetId), desc:expense.desc, date:expense.date, amount:String(expense.amount) }),
   });
 }
 
 function parseOwedStr(s) {
-  if (!s||s.trim()==="") return [];
+  if (!s || s.trim() === "") return [];
   return s.split(",").map(part => {
-    const [name,val] = (part||"").split(":").map(x=>x.trim());
-    if (!val) return null;
-    return { name: name||"?", type:"fixed", value: val.replace(/[$]/g,"") };
+    part = part.trim();
+    if (!part) return null;
+    const colonIdx = part.lastIndexOf(":");
+    if (colonIdx > -1) {
+      const name = part.slice(0, colonIdx).trim();
+      const val = part.slice(colonIdx + 1).replace(/[$\s]/g, "").trim();
+      return { name, type: "fixed", value: val };
+    }
+    const val = part.replace(/[$\s]/g, "");
+    return { name: "", type: "fixed", value: val };
   }).filter(Boolean);
 }
 
@@ -94,7 +104,7 @@ export default function App() {
       }));
       setExpenses(normalized);
       setStatus("ok");
-      showToast(`${normalized.length} gastos cargados ✓`);
+      showToast(`${normalized.length} gastos cargados`);
     } catch {
       setStatus("error");
       showToast("No se pudo conectar al Sheet","warn");
@@ -109,8 +119,7 @@ export default function App() {
 
   function owedTotalFromForm() {
     const base = parseFloat(form.amount)||0;
-    return form.owed.reduce((s,p) =>
-      p.type==="pct" ? s+(base*(parseFloat(p.value)||0)/100) : s+(parseFloat(p.value)||0), 0);
+    return form.owed.reduce((s,p) => s + calcOwedAmt(p, base), 0);
   }
 
   function addPerson() { setForm(f=>({...f, owed:[...f.owed,{name:"",type:"fixed",value:""}]})); }
@@ -120,23 +129,32 @@ export default function App() {
   async function submitForm(e) {
     e.preventDefault();
     if (!form.desc.trim()||!form.amount) return;
+    const base = parseFloat(form.amount);
+    const convertedOwed = form.owed
+      .filter(p => p.value)
+      .map(p => ({
+        name: p.name || "",
+        type: "fixed",
+        value: String(calcOwedAmt(p, base).toFixed(2)),
+      }));
+
     const expense = {
       id: editId ?? Date.now(),
       sheetId: editId ? (expenses.find(x=>x.id===editId)?.sheetId) : null,
-      desc: form.desc, amount: parseFloat(form.amount),
-      date: form.date,
-      owed: form.owed.filter(p=>p.value),
+      desc: form.desc, amount: base, date: form.date,
+      owed: convertedOwed,
       added: editId ? (expenses.find(x=>x.id===editId)?.added??false) : false,
       paid: editId ? (expenses.find(x=>x.id===editId)?.paid??false) : false,
     };
+
     if (editId) {
       setExpenses(ex=>ex.map(x=>x.id===editId?expense:x));
       setEditId(null);
-      showToast("Gasto actualizado ✓");
+      showToast("Gasto actualizado");
     } else {
       setExpenses(ex=>[expense,...ex]);
       setSyncing(true);
-      try { await sheetAppend(expense); showToast("Guardado en Sheet ✓"); }
+      try { await sheetAppend(expense); showToast("Guardado en Sheet"); }
       catch { showToast("Error al guardar","warn"); }
       setSyncing(false);
     }
@@ -150,7 +168,7 @@ export default function App() {
     const exp = updated.find(x=>x.id===id);
     setSyncing(true);
     try { await sheetUpdateStatus(exp); }
-    catch {}
+    catch(err) { console.error("Update error:", err); }
     setSyncing(false);
   }
 
@@ -159,7 +177,7 @@ export default function App() {
     setConfirmDelete(null);
     setExpenses(prev=>prev.filter(x=>x.id!==ex.id));
     setSyncing(true);
-    try { await sheetDelete(ex); showToast("Eliminado ✓"); }
+    try { await sheetDelete(ex); showToast("Eliminado"); }
     catch { showToast("Error al eliminar","warn"); }
     setSyncing(false);
   }
@@ -167,6 +185,7 @@ export default function App() {
   function startEdit(ex) {
     setEditId(ex.id);
     setForm({desc:ex.desc, amount:String(ex.amount), date:ex.date, owed:ex.owed||[]});
+    window.scrollTo({top:0, behavior:"smooth"});
     setTimeout(()=>descRef.current?.focus(),50);
   }
   function cancelEdit() { setEditId(null); setForm(EMPTY_FORM); }
@@ -177,18 +196,17 @@ export default function App() {
 
   const pending = expenses.filter(e=>!e.added);
   const totalCard = pending.reduce((s,e)=>s+e.amount,0);
-  // Me deben: only count if not paid yet
   const totalOwed = expenses.filter(e=>!e.paid).reduce((s,e)=>s+owedForExp(e),0);
-  const netPending = totalCard - expenses.filter(e=>!e.added).reduce((s,e)=>s+owedForExp(e),0);
-  const statusDot = status==="ok" ? "#059669" : status==="error" ? "#dc2626" : "#94a3b8";
+  const netPending = pending.reduce((s,e)=>s+(e.amount-owedForExp(e)),0);
+  const statusDot = status==="ok"?"#059669":status==="error"?"#dc2626":"#94a3b8";
 
   return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:"'DM Sans','Helvetica Neue',sans-serif",color:"#0f172a"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@700&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;}
-        input,select{outline:none;}
-        input:focus,select:focus{border-color:#0f4c81!important;box-shadow:0 0 0 3px rgba(15,76,129,0.1);}
+        input{outline:none;}
+        input:focus{border-color:#0f4c81!important;box-shadow:0 0 0 3px rgba(15,76,129,0.1);}
         .inp{background:#fff;border:1.5px solid #e2e8f0;color:#0f172a;padding:10px 14px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:14px;width:100%;transition:border .15s,box-shadow .15s;}
         .btn{cursor:pointer;border:none;font-family:'DM Sans',sans-serif;font-size:13px;border-radius:8px;padding:9px 16px;transition:all .15s;font-weight:500;}
         .btn:hover:not(:disabled){filter:brightness(.95);transform:translateY(-1px);}
@@ -202,7 +220,7 @@ export default function App() {
         .tog{padding:7px 16px;border-radius:20px;font-size:12px;cursor:pointer;border:1.5px solid #e2e8f0;background:#fff;color:#64748b;font-family:'DM Sans',sans-serif;font-weight:500;transition:all .15s;}
         .tog.on{background:#0f4c81;color:#fff;border-color:#0f4c81;}
         .ptt{display:flex;border:1.5px solid #e2e8f0;border-radius:8px;overflow:hidden;background:#fff;}
-        .pto{flex:1;padding:8px;text-align:center;font-size:12px;cursor:pointer;border:none;background:transparent;color:#64748b;font-family:'DM Sans',sans-serif;font-weight:500;transition:all .15s;}
+        .pto{flex:1;padding:8px;text-align:center;font-size:13px;cursor:pointer;border:none;background:transparent;color:#64748b;font-family:'DM Sans',sans-serif;font-weight:500;transition:all .15s;}
         .pto.on{background:#0f4c81;color:#fff;}
         .row{display:flex;align-items:flex-start;gap:10px;padding:14px 16px;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff;margin-bottom:8px;transition:all .2s;box-shadow:0 1px 3px rgba(0,0,0,.04);}
         .row:hover{border-color:#cbd5e1;box-shadow:0 2px 8px rgba(0,0,0,.07);}
@@ -219,18 +237,12 @@ export default function App() {
         @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
         .pulse{animation:pulse 1.5s ease-in-out infinite;}
         @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
-        hr{border:none;border-top:1.5px solid #f1f5f9;margin:14px 0;}
         .overlay{position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);}
         .modal{background:#fff;border-radius:16px;padding:28px;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.15);}
         .card{background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,.05);}
-        @media(max-width:640px){
-          .stats-grid{grid-template-columns:1fr 1fr!important;}
-          .form-row{grid-template-columns:1fr!important;}
-          .header-inner{flex-direction:column;gap:10px!important;align-items:flex-start!important;}
-        }
+        @media(max-width:640px){.stats-grid{grid-template-columns:1fr 1fr!important;}.form-row{grid-template-columns:1fr!important;}}
       `}</style>
 
-      {/* Delete modal */}
       {confirmDelete && (
         <div className="overlay" onClick={()=>setConfirmDelete(null)}>
           <div className="modal" onClick={e=>e.stopPropagation()}>
@@ -245,9 +257,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Top bar */}
       <div style={{background:"#fff",borderBottom:"1.5px solid #e2e8f0",padding:"0 24px",position:"sticky",top:0,zIndex:100}}>
-        <div style={{maxWidth:720,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",height:60}} className="header-inner">
+        <div style={{maxWidth:720,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",height:60}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:34,height:34,background:"#0f4c81",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center"}}>
               <span style={{color:"#fff",fontSize:17}}>◈</span>
@@ -264,15 +275,13 @@ export default function App() {
               Sheet
             </div>
             <button className="btn btn-ghost btn-sm" onClick={loadSheet} disabled={loading}>
-              {loading ? <span className="spin">⟳</span> : "⟳"} Sync
+              {loading?<span className="spin">⟳</span>:"⟳"} Sync
             </button>
           </div>
         </div>
       </div>
 
       <div style={{maxWidth:720,margin:"0 auto",padding:"24px 20px 60px"}}>
-
-        {/* Stats */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:24}} className="stats-grid">
           <div className="card">
             <div style={{fontSize:9,letterSpacing:2,color:"#94a3b8",marginBottom:6,fontWeight:600}}>A TARJETA</div>
@@ -291,10 +300,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* Form */}
         <div className="card" style={{marginBottom:20,border:editId?"1.5px solid #0f4c81":"1.5px solid #e2e8f0"}}>
           <div style={{fontSize:10,letterSpacing:2,color:editId?"#0f4c81":"#94a3b8",marginBottom:14,fontWeight:600}}>
-            {editId ? "✏️  EDITANDO GASTO" : "+ NUEVO GASTO"}
+            {editId?"✏️  EDITANDO GASTO":"+ NUEVO GASTO"}
           </div>
           <form onSubmit={submitForm}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 120px",gap:10,marginBottom:10}} className="form-row">
@@ -308,23 +316,23 @@ export default function App() {
                 onChange={e=>setForm(f=>({...f,date:e.target.value}))} />
             </div>
 
-            {/* Me deben */}
             <div style={{background:"#fffbeb",border:"1.5px solid #fde68a",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-                <div>
-                  <span style={{fontSize:11,letterSpacing:1.5,color:"#b45309",fontWeight:600}}>ME DEBEN </span>
-                  <span style={{fontSize:11,color:"#92400e"}}>— el total completo va a tu tarjeta</span>
-                </div>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={addPerson}>+ persona</button>
+                <span style={{fontSize:11,letterSpacing:1.5,color:"#b45309",fontWeight:600}}>ME DEBEN</span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={addPerson}>+ agregar</button>
               </div>
-              {form.owed.length===0 && <div style={{fontSize:12,color:"#92400e",opacity:.6}}>Nadie te debe en este gasto.</div>}
+              {form.owed.length===0 && (
+                <div style={{fontSize:12,color:"#92400e",opacity:.6}}>Nadie te debe en este gasto.</div>
+              )}
               {form.owed.map((p,i)=>(
                 <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
-                  <input className="inp" placeholder="Nombre" value={p.name}
+                  <input className="inp" placeholder="Nombre (opcional)" value={p.name}
                     onChange={e=>updatePerson(i,"name",e.target.value)} style={{flex:2}} />
-                  <div className="ptt" style={{flexShrink:0,width:70}}>
-                    <button type="button" className={`pto ${p.type==="fixed"?"on":""}`} onClick={()=>updatePerson(i,"type","fixed")}>$</button>
-                    <button type="button" className={`pto ${p.type==="pct"?"on":""}`} onClick={()=>updatePerson(i,"type","pct")}>%</button>
+                  <div className="ptt" style={{flexShrink:0,width:80}}>
+                    <button type="button" className={`pto ${p.type==="fixed"?"on":""}`}
+                      onClick={()=>updatePerson(i,"type","fixed")}>$</button>
+                    <button type="button" className={`pto ${p.type==="pct"?"on":""}`}
+                      onClick={()=>updatePerson(i,"type","pct")}>%</button>
                   </div>
                   <input className="inp" type="number" min="0" step="0.01"
                     placeholder={p.type==="pct"?"50":"25.00"} value={p.value}
@@ -336,22 +344,21 @@ export default function App() {
               {form.owed.length>0 && form.amount && (
                 <div style={{marginTop:12,display:"flex",gap:20,fontSize:12,paddingTop:8,borderTop:"1px solid #fde68a"}}>
                   <span style={{color:"#92400e"}}>Cobras: <strong style={{color:"#b45309"}}>{fmt(owedTotalFromForm())}</strong></span>
-                  <span style={{color:"#92400e"}}>Tu parte: <strong style={{color:"#059669"}}>{fmt(Math.max(0,parseFloat(form.amount)-owedTotalFromForm()))}</strong></span>
+                  <span style={{color:"#92400e"}}>Tu parte: <strong style={{color:"#059669"}}>{fmt(Math.max(0,(parseFloat(form.amount)||0)-owedTotalFromForm()))}</strong></span>
                 </div>
               )}
             </div>
 
             <div style={{display:"flex",gap:8}}>
               <button type="submit" className="btn btn-primary" style={{flex:1,padding:"11px"}} disabled={syncing}>
-                {syncing ? "Guardando..." : editId ? "Guardar cambios" : "Agregar gasto"}
+                {syncing?"Guardando...":editId?"Guardar cambios":"Agregar gasto"}
               </button>
               {editId && <button type="button" className="btn btn-ghost" onClick={cancelEdit}>Cancelar</button>}
             </div>
           </form>
         </div>
 
-        {/* Filter */}
-        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:16}}>
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
           <span style={{fontSize:11,color:"#94a3b8",letterSpacing:1,fontWeight:600}}>VER:</span>
           {[["all","Todos"],["pending","Pendientes"],["added","Ingresados"]].map(([v,l])=>(
             <button key={v} className={`tog ${filter===v?"on":""}`} onClick={()=>setFilter(v)}>{l}</button>
@@ -359,23 +366,21 @@ export default function App() {
           <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8"}}>{filtered.length} gastos</span>
         </div>
 
-        {/* Legend */}
         <div style={{display:"flex",gap:16,marginBottom:14,fontSize:11,color:"#94a3b8"}}>
           <div style={{display:"flex",alignItems:"center",gap:5}}>
             <div style={{width:16,height:16,borderRadius:4,background:"#0f4c81",display:"flex",alignItems:"center",justifyContent:"center"}}>
-              <span style={{color:"#fff",fontSize:10}}>✓</span>
+              <span style={{color:"#fff",fontSize:10,fontWeight:700}}>✓</span>
             </div>
             Ingresado
           </div>
           <div style={{display:"flex",alignItems:"center",gap:5}}>
             <div style={{width:16,height:16,borderRadius:4,background:"#059669",display:"flex",alignItems:"center",justifyContent:"center"}}>
-              <span style={{color:"#fff",fontSize:10}}>✓</span>
+              <span style={{color:"#fff",fontSize:10,fontWeight:700}}>✓</span>
             </div>
             Me pagaron
           </div>
         </div>
 
-        {/* List */}
         {loading ? (
           <div style={{textAlign:"center",padding:"50px 0",color:"#94a3b8",fontSize:13}}>
             <span className="spin" style={{fontSize:22,display:"block",marginBottom:10}}>⟳</span>
@@ -384,79 +389,64 @@ export default function App() {
         ) : <>
           {filtered.length===0 && (
             <div style={{textAlign:"center",padding:"50px 0",color:"#cbd5e1",fontSize:13}}>
-              {expenses.length===0 ? "Presiona Sync para cargar tus gastos." : "Sin gastos aquí."}
+              {expenses.length===0?"Presiona Sync para cargar tus gastos.":"Sin gastos aquí."}
             </div>
           )}
-
           {filtered.map(ex => {
             const owedAmt = owedForExp(ex);
             const hasOwed = owedAmt > 0;
+            const fullyDone = ex.added && (!hasOwed || ex.paid);
             return (
-              <div key={ex.id} className={`row ${ex.added&&(!hasOwed||ex.paid)?"dim":""}`}>
-                {/* Checkmarks */}
-                <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0,paddingTop:2}}>
-                  {/* Ingresado */}
-                  <div style={{display:"flex",alignItems:"center",gap:5}}>
-                    <div className={`chk blue ${ex.added?"on":""}`} onClick={()=>toggleField(ex.id,"added")}>
-                      {ex.added && <span style={{fontSize:12,color:"#fff",fontWeight:700}}>✓</span>}
-                    </div>
-                  </div>
-                  {/* Me pagaron — solo si hay monto que deben */}
+              <div key={ex.id} className={`row ${fullyDone?"dim":""}`}>
+                <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,paddingTop:2}}>
+                  <div className={`chk blue ${ex.added?"on":""}`} onClick={()=>toggleField(ex.id,"added")} title="Ingresado" />
                   {hasOwed && (
-                    <div style={{display:"flex",alignItems:"center",gap:5}}>
-                      <div className={`chk green ${ex.paid?"on":""}`} onClick={()=>toggleField(ex.id,"paid")}>
-                        {ex.paid && <span style={{fontSize:12,color:"#fff",fontWeight:700}}>✓</span>}
-                      </div>
+                    <div className={`chk green ${ex.paid?"on":""}`} onClick={()=>toggleField(ex.id,"paid")} title="Me pagaron">
+                      {ex.paid && <span style={{fontSize:12,color:"#fff",fontWeight:700}}>✓</span>}
                     </div>
                   )}
                 </div>
 
-                {/* Content */}
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:14,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ex.desc}</div>
-                  <div style={{fontSize:11,color:"#94a3b8",marginTop:3,display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+                  <div style={{fontSize:11,color:"#94a3b8",marginTop:3,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
                     <span>{ex.date}</span>
                     {hasOwed && !ex.paid && (
-                      <span style={{color:"#b45309",fontWeight:500,background:"#fffbeb",padding:"1px 6px",borderRadius:4,border:"1px solid #fde68a"}}>
-                        {(ex.owed||[]).map(p=>p.name).join(", ")} debe {fmt(owedAmt)}
+                      <span style={{color:"#b45309",fontWeight:500,background:"#fffbeb",padding:"1px 7px",borderRadius:4,border:"1px solid #fde68a"}}>
+                        {(ex.owed||[]).map(p=>p.name||"Alguien").join(", ")} debe {fmt(owedAmt)}
                       </span>
                     )}
                     {hasOwed && ex.paid && (
-                      <span style={{color:"#059669",fontWeight:500,background:"#f0fdf4",padding:"1px 6px",borderRadius:4,border:"1px solid #bbf7d0"}}>
+                      <span style={{color:"#059669",fontWeight:500,background:"#f0fdf4",padding:"1px 7px",borderRadius:4,border:"1px solid #bbf7d0"}}>
                         Cobrado {fmt(owedAmt)}
                       </span>
                     )}
                   </div>
                 </div>
 
-                {/* Amount */}
                 <div style={{textAlign:"right",flexShrink:0}}>
                   <div style={{fontSize:15,fontWeight:600}}>{fmt(ex.amount)}</div>
                   {hasOwed && !ex.paid && <div style={{fontSize:11,color:"#b45309"}}>cobras {fmt(owedAmt)}</div>}
                   {hasOwed && <div style={{fontSize:11,color:"#059669"}}>neto {fmt(ex.amount-owedAmt)}</div>}
                 </div>
 
-                {/* Status labels */}
                 <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
-                  <span style={{fontSize:9,padding:"2px 7px",borderRadius:20,fontWeight:600,
+                  <span style={{fontSize:9,padding:"2px 7px",borderRadius:20,fontWeight:600,whiteSpace:"nowrap",
                     border:`1px solid ${ex.added?"#bfdbfe":"#e2e8f0"}`,
                     color:ex.added?"#0f4c81":"#94a3b8",
-                    background:ex.added?"#eff6ff":"#f8fafc",
-                    whiteSpace:"nowrap"}}>
+                    background:ex.added?"#eff6ff":"#f8fafc"}}>
                     {ex.added?"✓ ingresado":"○ pendiente"}
                   </span>
                   {hasOwed && (
-                    <span style={{fontSize:9,padding:"2px 7px",borderRadius:20,fontWeight:600,
+                    <span style={{fontSize:9,padding:"2px 7px",borderRadius:20,fontWeight:600,whiteSpace:"nowrap",
                       border:`1px solid ${ex.paid?"#bbf7d0":"#fde68a"}`,
                       color:ex.paid?"#059669":"#b45309",
-                      background:ex.paid?"#f0fdf4":"#fffbeb",
-                      whiteSpace:"nowrap"}}>
+                      background:ex.paid?"#f0fdf4":"#fffbeb"}}>
                       {ex.paid?"✓ cobrado":"○ sin cobrar"}
                     </span>
                   )}
                 </div>
 
-                {/* Actions */}
                 <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
                   <button className="btn btn-ghost btn-sm" onClick={()=>startEdit(ex)}>✏️</button>
                   <button className="btn btn-danger btn-sm" onClick={()=>setConfirmDelete(ex)}>🗑</button>
