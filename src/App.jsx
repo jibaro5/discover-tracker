@@ -94,7 +94,9 @@ export default function App() {
     setLoading(true); setStatus("idle");
     try {
       const rows = await sheetRead();
-      const normalized = rows.map((e,i) => ({
+      const normalized = rows
+      .filter(e => e.date && String(e.date).trim() !== "")
+      .map((e,i) => ({
         id: e.id || String(Date.now()+i),
         sheetId: e.id,
         desc: e.desc||"",
@@ -104,16 +106,16 @@ export default function App() {
         added: e.added===true||e.added==="SI",
         paid: e.paid===true||e.paid==="SI",
       }));
-      setExpenses(normalized);
-      setStatus("ok");
-      showToast(`${normalized.length} gastos cargados`);
-    } catch {
-      setStatus("error");
-      showToast("No se pudo conectar al Sheet","warn");
-    }
-    setLoading(false);
+    setExpenses(normalized);
+    setStatus("ok");
+    showToast(`${normalized.length} gastos cargados`);
+  } catch(err) {
+    setStatus("error");
+    showToast("No se pudo conectar al Sheet","warn");
+    console.error(err);
   }
-
+  setLoading(false);
+}
   function showToast(msg, type="ok") {
     setToast({msg,type});
     setTimeout(()=>setToast(null), 2500);
