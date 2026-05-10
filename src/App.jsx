@@ -5,8 +5,10 @@ const EMPTY_FORM = { desc: "", amount: "", date: new Date().toISOString().slice(
 
 function today() { return new Date().toISOString().slice(0,10); }
 function fmt(n) { return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(n||0); }
-function parseAmt(s) { return parseFloat(String(s).replace(/[$,]/g,""))||0; }
-
+function parseAmt(s) { 
+  const cleaned = String(s).replace(/[$,\s]/g,"").replace(/^\((.+)\)$/, "-$1");
+  return parseFloat(cleaned)||0; 
+}
 function calcOwedAmt(p, totalAmount) {
   if (p.type === "pct") return (totalAmount * (parseFloat(p.value) || 0)) / 100;
   return parseFloat(p.value) || 0;
