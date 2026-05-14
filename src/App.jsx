@@ -115,9 +115,9 @@ export default function App() {
         try {
           const e = rows[i];
           const dateVal = e.date ? String(e.date).trim() : "";
-          if (!dateVal || dateVal === "") continue; // skip rows without date
+          if (!dateVal || dateVal === "") continue;
           const amt = parseAmt(e.amount);
-          if (amt === 0 && !e.desc) continue; // skip empty rows
+          if (amt === 0 && !e.desc) continue;
           normalized.push({
             id: e.id || String(Date.now() + i),
             sheetId: e.id,
