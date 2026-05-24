@@ -107,7 +107,7 @@ async function sheetDelete(expense) {
   });
 }
 
-const CATEGORIES = ["🍽️ Comida","🛒 Super","⛽ Gas","🎬 Ocio","✈️ Viaje","🏥 Salud","🛍️ Compras","📦 Otro"];
+const CATEGORIES = ["🍽️ Comida","🛒 Super","⛽ Gas","🎬 Ocio","✈️ Viaje","🏥 Salud","🛍️ Compras","📅 Gastos fijos","📦 Otro"];
 const EMPTY_FORM = { desc:"", amount:"", date:today(), category:"", owed:[] };
 
 export default function App() {
