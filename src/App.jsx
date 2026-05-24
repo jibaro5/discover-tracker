@@ -107,7 +107,13 @@ async function sheetDelete(expense) {
   });
 }
 
-const CATEGORIES = ["🍽️ Comida","🛒 Super","⛽ Gas","🎬 Ocio","✈️ Viaje","🏥 Salud","🛍️ Compras","📅 Gastos fijos","📦 Otro"];
+const CATEGORIES = ["Comida","Super","Gas","Ocio","Viaje","Salud","Compras","Gastos fijos","Otro"];
+const CAT_EMOJI = {"Comida":"🍽️","Super":"🛒","Gas":"⛽","Ocio":"🎬","Viaje":"✈️","Salud":"🏥","Compras":"🛍️","Gastos fijos":"📅","Otro":"📦"};
+function catDisplay(c) {
+  if (!c) return "";
+  const key = Object.keys(CAT_EMOJI).find(k => c.toLowerCase().includes(k.toLowerCase()));
+  return key ? `${CAT_EMOJI[key]} ${key}` : c;
+}
 const EMPTY_FORM = { desc:"", amount:"", date:today(), category:"", owed:[] };
 
 export default function App() {
@@ -398,7 +404,7 @@ export default function App() {
                 <select className="sel" value={form.category}
                   onChange={e=>setForm(f=>({...f,category:e.target.value}))}>
                   <option value="">Sin categoría</option>
-                  {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+                  {CATEGORIES.map(c=><option key={c} value={c}>{CAT_EMOJI[c]||""} {c}</option>)}
                 </select>
               </div>
 
@@ -613,7 +619,7 @@ export default function App() {
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
                       <div style={{fontSize:14,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ex.desc}</div>
-                      {ex.category && <span style={{fontSize:13,flexShrink:0}}>{ex.category.split(" ")[0]}</span>}
+                      {ex.category && <span style={{fontSize:12,color:"#64748b",flexShrink:0,background:"#f1f5f9",padding:"2px 6px",borderRadius:4}}>{catDisplay(ex.category)}</span>}
                     </div>
                     <div style={{fontSize:11,color:"#94a3b8",display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
                       <span>{ex.date}</span>
@@ -690,7 +696,7 @@ export default function App() {
 
               // Categories with %
               const catMap = {};
-              monthExps.forEach(e=>{ const cat=e.category||"📦 Otro"; catMap[cat]=(catMap[cat]||0)+e.amount; });
+              monthExps.forEach(e=>{ const cat=catDisplay(e.category||"Otro"); catMap[cat]=(catMap[cat]||0)+e.amount; });
               const topCats = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
 
               // Top 3 individual expenses
@@ -767,7 +773,7 @@ export default function App() {
                           </div>
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ex.desc}</div>
-                            <div style={{fontSize:10,color:"#94a3b8"}}>{ex.date}{ex.category?" · "+ex.category:""}</div>
+                            <div style={{fontSize:10,color:"#94a3b8"}}>{ex.date}{ex.category?" · "+catDisplay(ex.category):""}</div>
                           </div>
                           <div style={{fontSize:14,fontWeight:700,color:i===0?"#0f4c81":"#0f172a",flexShrink:0}}>{fmt(ex.amount)}</div>
                         </div>
