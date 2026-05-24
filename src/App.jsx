@@ -25,30 +25,23 @@ function calcOwedAmt(p, total) {
   return parseFloat(p.value) || 0;
 }
 function parseOwedStr(s) {
-  if (!s || String(s).trim() === "" || String(s).trim() === "0") return [];
+  if (!s || String(s).trim() === "") return [];
   try {
-    const str = String(s).trim();
-    // New format: plain number like "14.98"
-    const num = parseFloat(str.replace(/[$,]/g,""));
-    if (!isNaN(num) && num > 0 && !str.includes(":")) {
-      return [{ name: "", type: "fixed", value: String(num) }];
-    }
-    // Old format: "Name: $14.98, Name2: $5.00"
-    return str.split(",").map(part => {
+    return String(s).split(",").map(part => {
       part = part.trim();
       if (!part) return null;
       const colonIdx = part.lastIndexOf(":");
       if (colonIdx > -1) {
         const name = part.slice(0, colonIdx).trim();
         const val = part.slice(colonIdx + 1).replace(/[$\s]/g, "").trim();
-        const n = parseFloat(val);
-        if (isNaN(n)) return null;
-        return { name, type: "fixed", value: String(n) };
+        const num = parseFloat(val);
+        if (isNaN(num)) return null;
+        return { name, type: "fixed", value: String(num) };
       }
       const val = part.replace(/[$\s]/g, "");
-      const n = parseFloat(val);
-      if (isNaN(n)) return null;
-      return { name: "", type: "fixed", value: String(n) };
+      const num = parseFloat(val);
+      if (isNaN(num)) return null;
+      return { name: "", type: "fixed", value: String(num) };
     }).filter(Boolean);
   } catch { return []; }
 }
