@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 
 const SCRIPT_URL = "/api/sheet";
-const CLOSE_DAY = 20;  // Statement closes on the 20th
-const DUE_DAY = 17;    // Payment due on the 17th of next month
+const CLOSE_DAY = 20;
+const DUE_DAY = 17;
 
 function today() { return new Date().toISOString().slice(0,10); }
 function fmt(n) {
@@ -50,38 +50,28 @@ function owedForExp(ex) {
   return ex.owed.reduce((s,p) => s + (parseFloat(p.value)||0), 0);
 }
 
-// Billing cycle: closes on the 20th, due 17th of next month
 function getCycleInfo() {
   const now = new Date();
   const day = now.getDate();
   const year = now.getFullYear();
   const month = now.getMonth();
-
   let cycleStart, cycleEnd, dueDate;
-
   if (day <= CLOSE_DAY) {
-    // We're before the close date — current cycle started on the 21st of last month
     cycleStart = new Date(year, month - 1, CLOSE_DAY + 1);
     cycleEnd = new Date(year, month, CLOSE_DAY);
     dueDate = new Date(year, month + 1, DUE_DAY);
   } else {
-    // We're after the close date — current cycle started on the 21st of this month
     cycleStart = new Date(year, month, CLOSE_DAY + 1);
     cycleEnd = new Date(year, month + 1, CLOSE_DAY);
     dueDate = new Date(year, month + 2, DUE_DAY);
   }
-
-  // Days until due
   const msPerDay = 1000 * 60 * 60 * 24;
   const daysUntilDue = Math.ceil((dueDate - now) / msPerDay);
-  const daysUntilClose = Math.ceil((cycleEnd - now) / msPerDay);
-
   return {
     start: cycleStart.toISOString().slice(0,10),
     end: cycleEnd.toISOString().slice(0,10),
     due: dueDate.toISOString().slice(0,10),
     daysUntilDue,
-    daysUntilClose,
     isUrgent: daysUntilDue <= 5,
   };
 }
@@ -133,6 +123,7 @@ export default function App() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [tab, setTab] = useState("list");
+  const [confirmBulkPaid, setConfirmBulkPaid] = useState(false);
   const descRef = useRef();
 
   useEffect(() => { loadSheet(); }, []);
@@ -229,6 +220,22 @@ export default function App() {
     setSyncing(false);
   }
 
+  async function markAllPaid() {
+    setConfirmBulkPaid(false);
+    const unpaidWithOwed = expenses.filter(e => owedForExp(e) > 0 && !e.paid);
+    if (unpaidWithOwed.length === 0) return;
+    const updated = expenses.map(x => owedForExp(x) > 0 && !x.paid ? {...x, paid:true} : x);
+    setExpenses(updated);
+    setSyncing(true);
+    try {
+      for (const exp of unpaidWithOwed) {
+        await sheetUpdateStatus({...exp, paid:true});
+      }
+      showToast(`${unpaidWithOwed.length} gastos marcados como pagados ✓`);
+    } catch { showToast("Error al actualizar","warn"); }
+    setSyncing(false);
+  }
+
   async function doDelete() {
     const ex = confirmDelete;
     setConfirmDelete(null);
@@ -257,10 +264,18 @@ export default function App() {
   const months = [...new Set(expenses.map(e=>getMonth(e.date)))].sort().reverse();
   const availableMonths = [...new Set(expenses.map(e=>getMonth(e.date)))].sort().reverse();
 
+  // Me deben filter — gastos con owed sin pagar
+  const meDeben = expenses.filter(e => owedForExp(e) > 0 && !e.paid);
+  const meDebenTotal = meDeben.reduce((s,e)=>s+owedForExp(e),0);
+
   let filtered = expenses;
-  if (monthFilter !== "all") filtered = filtered.filter(e=>getMonth(e.date)===monthFilter);
-  if (filter === "pending") filtered = filtered.filter(e=>!e.added);
-  else if (filter === "added") filtered = filtered.filter(e=>e.added);
+  if (filter === "medeben") {
+    filtered = meDeben;
+  } else {
+    if (monthFilter !== "all") filtered = filtered.filter(e=>getMonth(e.date)===monthFilter);
+    if (filter === "pending") filtered = filtered.filter(e=>!e.added);
+    else if (filter === "added") filtered = filtered.filter(e=>e.added);
+  }
 
   const statusDot = status==="ok"?"#059669":status==="error"?"#dc2626":"#94a3b8";
 
@@ -281,16 +296,19 @@ export default function App() {
         .btn-g{background:#fff;color:#64748b;border:1.5px solid #e2e8f0;}
         .btn-g:hover:not(:disabled){border-color:#cbd5e1;color:#0f172a;}
         .btn-d{background:#fef2f2;color:#dc2626;border:1.5px solid #fecaca;}
+        .btn-amber{background:#fffbeb;color:#b45309;border:1.5px solid #fde68a;}
         .btn-sm{padding:6px 12px;font-size:12px;border-radius:8px;}
-        .tog{padding:8px 16px;border-radius:20px;font-size:12px;cursor:pointer;border:none;background:transparent;color:#64748b;font-family:'DM Sans',sans-serif;font-weight:600;transition:all .15s;}
+        .tog{padding:8px 14px;border-radius:20px;font-size:12px;cursor:pointer;border:none;background:transparent;color:#64748b;font-family:'DM Sans',sans-serif;font-weight:600;transition:all .15s;white-space:nowrap;}
         .tog.on{background:#0f4c81;color:#fff;}
-        .tog:hover:not(.on){background:#e2e8f0;}
+        .tog.on-amber{background:#b45309;color:#fff;}
+        .tog:hover:not(.on):not(.on-amber){background:#e2e8f0;}
         .ptt{display:flex;background:#f1f5f9;border-radius:8px;padding:3px;gap:2px;}
         .pto{flex:1;padding:7px 8px;text-align:center;font-size:12px;cursor:pointer;border:none;background:transparent;color:#64748b;font-family:'DM Sans',sans-serif;font-weight:600;transition:all .15s;border-radius:6px;}
         .pto.on{background:#fff;color:#0f4c81;box-shadow:0 1px 4px rgba(0,0,0,.1);}
         .row{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border-radius:12px;background:#fff;margin-bottom:8px;transition:all .2s;box-shadow:0 1px 3px rgba(0,0,0,.05);border:1.5px solid transparent;}
         .row:hover{border-color:#e2e8f0;box-shadow:0 4px 12px rgba(0,0,0,.08);}
         .row.dim{opacity:.35;}
+        .row.owed-highlight{border-color:#fde68a;background:#fffdf5;}
         .chk{width:24px;height:24px;border-radius:7px;border:2px solid #e2e8f0;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;}
         .chk:hover{border-color:#94a3b8;transform:scale(1.05);}
         .chk.blue.on{background:#0f4c81;border-color:#0f4c81;box-shadow:0 2px 8px rgba(15,76,129,.3);}
@@ -315,11 +333,11 @@ export default function App() {
         .badge-gray{background:#f8fafc;color:#94a3b8;border:1px solid #e2e8f0;}
         .badge-amber{background:#fffbeb;color:#b45309;border:1px solid #fde68a;}
         .badge-green{background:#f0fdf4;color:#059669;border:1px solid #bbf7d0;}
-        .badge-red{background:#fef2f2;color:#dc2626;border:1px solid #fecaca;}
         .nav-tab{display:flex;align-items:center;gap:6px;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;color:#64748b;transition:all .15s;border:none;background:transparent;font-family:'DM Sans',sans-serif;}
         .nav-tab.on{background:#fff;color:#0f4c81;box-shadow:0 1px 4px rgba(0,0,0,.08);}
         .fab{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#0f4c81;color:#fff;border:none;font-size:26px;cursor:pointer;box-shadow:0 4px 16px rgba(15,76,129,.4);display:flex;align-items:center;justify-content:center;transition:all .2s;z-index:100;}
         .fab:hover{transform:scale(1.1);}
+        .medeben-banner{background:linear-gradient(135deg,#b45309,#d97706);border-radius:12px;padding:16px 20px;color:#fff;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;}
         @media(max-width:640px){.sg{grid-template-columns:1fr 1fr!important;}}
       `}</style>
 
@@ -333,6 +351,25 @@ export default function App() {
             <div style={{display:"flex",gap:8}}>
               <button className="btn btn-d" style={{flex:1}} onClick={doDelete}>Eliminar</button>
               <button className="btn btn-g" onClick={()=>setConfirmDelete(null)}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk paid confirmation */}
+      {confirmBulkPaid && (
+        <div className="modal-overlay" onClick={()=>setConfirmBulkPaid(false)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:11,letterSpacing:2,color:"#b45309",marginBottom:12,fontWeight:700}}>MARCAR TODOS COMO PAGADOS</div>
+            <div style={{fontSize:15,marginBottom:8,fontWeight:600}}>{meDeben.length} gastos · {fmt(meDebenTotal)}</div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:24}}>
+              Esto marcará todos los gastos pendientes de cobro como pagados en la app y en el Sheet.
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn btn-amber" style={{flex:1}} onClick={markAllPaid}>
+                ✓ Sí, todos pagados
+              </button>
+              <button className="btn btn-g" onClick={()=>setConfirmBulkPaid(false)}>Cancelar</button>
             </div>
           </div>
         </div>
@@ -431,16 +468,16 @@ export default function App() {
       <div style={{maxWidth:720,margin:"0 auto",padding:"20px 16px 100px"}}>
 
         {/* Cycle banner */}
-        <div style={{background:`linear-gradient(135deg, ${cycle.isUrgent?"#dc2626, #b91c1c":"#0f4c81, #1e6ab0"})`,borderRadius:14,padding:"20px 24px",color:"#fff",marginBottom:16}}>
+        <div style={{background:`linear-gradient(135deg,${cycle.isUrgent?"#dc2626,#b91c1c":"#0f4c81,#1e6ab0"})`,borderRadius:14,padding:"20px 24px",color:"#fff",marginBottom:16}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
             <div>
-              <div style={{fontSize:10,letterSpacing:2,opacity:.7,fontWeight:600,marginBottom:4}}>CICLO ACTUAL · DISCOVER</div>
+              <div style={{fontSize:10,letterSpacing:2,opacity:.7,fontWeight:600,marginBottom:4}}>CICLO · DISCOVER</div>
               <div style={{fontSize:12,opacity:.8,marginBottom:2}}>📅 Cierre: {cycle.end}</div>
               <div style={{fontSize:12,opacity:.8}}>
                 💳 Vence: {cycle.due}
                 {cycle.daysUntilDue <= 10 && (
                   <span style={{marginLeft:8,background:"rgba(255,255,255,.2)",padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:700}}>
-                    {cycle.daysUntilDue <= 0 ? "¡VENCIDO!" : `${cycle.daysUntilDue}d`}
+                    {cycle.daysUntilDue <= 0?"¡VENCIDO!":cycle.daysUntilDue===1?"¡Mañana!":cycle.daysUntilDue===0?"¡Hoy!":`${cycle.daysUntilDue}d`}
                   </span>
                 )}
               </div>
@@ -478,14 +515,26 @@ export default function App() {
 
         {/* ── GASTOS TAB ── */}
         {tab==="list" && <>
-          <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
-            <div style={{display:"flex",background:"#e2e8f0",borderRadius:20,padding:"3px"}}>
+          {/* Filters */}
+          <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
+            <div style={{display:"flex",background:"#e2e8f0",borderRadius:20,padding:"3px",gap:2}}>
               {[["all","Todos"],["pending","Pendientes"],["added","Ingresados"]].map(([v,l])=>(
-                <button key={v} className={`tog ${filter===v?"on":""}`} style={{padding:"6px 14px",fontSize:11}}
+                <button key={v} className={`tog ${filter===v?"on":""}`} style={{padding:"6px 12px",fontSize:11}}
                   onClick={()=>setFilter(v)}>{l}</button>
               ))}
+              <button
+                className={`tog ${filter==="medeben"?"on-amber":""}`}
+                style={{padding:"6px 12px",fontSize:11,display:"flex",alignItems:"center",gap:4}}
+                onClick={()=>setFilter("medeben")}>
+                ✋ Me deben
+                {meDeben.length > 0 && (
+                  <span style={{background:filter==="medeben"?"rgba(255,255,255,.3)":"#b45309",color:"#fff",borderRadius:20,padding:"0px 6px",fontSize:10,fontWeight:700,minWidth:18,textAlign:"center"}}>
+                    {meDeben.length}
+                  </span>
+                )}
+              </button>
             </div>
-            {availableMonths.length > 1 && (
+            {filter !== "medeben" && availableMonths.length > 1 && (
               <select className="sel" value={monthFilter} onChange={e=>setMonthFilter(e.target.value)}
                 style={{width:"auto",padding:"7px 12px",fontSize:12,borderRadius:20}}>
                 <option value="all">Todos los meses</option>
@@ -495,20 +544,38 @@ export default function App() {
             <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8",fontWeight:500}}>{filtered.length}</span>
           </div>
 
-          <div style={{display:"flex",gap:12,marginBottom:14,fontSize:11,color:"#94a3b8",fontWeight:500}}>
-            <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <div style={{width:18,height:18,borderRadius:5,background:"#0f4c81",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                <span style={{color:"#fff",fontSize:10,fontWeight:700}}>✓</span>
+          {/* Me deben banner */}
+          {filter === "medeben" && meDeben.length > 0 && (
+            <div className="medeben-banner">
+              <div>
+                <div style={{fontSize:10,letterSpacing:2,opacity:.8,fontWeight:600,marginBottom:4}}>TOTAL POR COBRAR</div>
+                <div style={{fontFamily:"'Playfair Display',serif",fontSize:26,fontWeight:700}}>{fmt(meDebenTotal)}</div>
+                <div style={{fontSize:11,opacity:.8,marginTop:2}}>{meDeben.length} gastos pendientes de cobro</div>
               </div>
-              💳 Ingresado
+              <button className="btn" style={{background:"rgba(255,255,255,.2)",color:"#fff",border:"1.5px solid rgba(255,255,255,.4)",fontSize:12,padding:"10px 16px"}}
+                onClick={()=>setConfirmBulkPaid(true)}>
+                ✓ Marcar todos<br/>como pagados
+              </button>
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <div style={{width:18,height:18,borderRadius:5,background:"#059669",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                <span style={{color:"#fff",fontSize:10,fontWeight:700}}>✓</span>
+          )}
+
+          {/* Legend */}
+          {filter !== "medeben" && (
+            <div style={{display:"flex",gap:12,marginBottom:14,fontSize:11,color:"#94a3b8",fontWeight:500}}>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                <div style={{width:18,height:18,borderRadius:5,background:"#0f4c81",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  <span style={{color:"#fff",fontSize:10,fontWeight:700}}>✓</span>
+                </div>
+                💳 Ingresado
               </div>
-              ✋ Pagado
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                <div style={{width:18,height:18,borderRadius:5,background:"#059669",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  <span style={{color:"#fff",fontSize:10,fontWeight:700}}>✓</span>
+                </div>
+                ✋ Pagado
+              </div>
             </div>
-          </div>
+          )}
 
           {loading ? (
             <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8",fontSize:13}}>
@@ -517,8 +584,11 @@ export default function App() {
             </div>
           ) : <>
             {filtered.length===0 && (
-              <div style={{textAlign:"center",padding:"60px 0",color:"#cbd5e1",fontSize:13}}>
-                {expenses.length===0?"Presiona ⟳ para cargar tus gastos.":"Sin gastos aquí."}
+              <div style={{textAlign:"center",padding:"60px 0",fontSize:13}}>
+                <div style={{fontSize:32,marginBottom:12}}>{filter==="medeben"?"🎉":"📭"}</div>
+                <div style={{color:"#cbd5e1"}}>
+                  {filter==="medeben"?"¡Nadie te debe nada!":"Sin gastos aquí."}
+                </div>
               </div>
             )}
 
@@ -528,7 +598,7 @@ export default function App() {
               const fullyDone = ex.added && (!hasOwed || ex.paid);
               const inCycle = ex.date >= cycle.start && ex.date <= cycle.end;
               return (
-                <div key={ex.id} className={`row ${fullyDone?"dim":""}`}>
+                <div key={ex.id} className={`row ${fullyDone?"dim":""} ${filter==="medeben"?"owed-highlight":""}`}>
                   <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,paddingTop:2}}>
                     <div className={`chk blue ${ex.added?"on":""}`} onClick={()=>toggleField(ex.id,"added")} title="💳 Ingresado a cuenta">
                       {ex.added && <span style={{fontSize:11,color:"#fff",fontWeight:800}}>✓</span>}
@@ -547,7 +617,7 @@ export default function App() {
                     </div>
                     <div style={{fontSize:11,color:"#94a3b8",display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
                       <span>{ex.date}</span>
-                      {inCycle && <span className="badge badge-blue" style={{fontSize:9}}>ciclo actual</span>}
+                      {inCycle && filter!=="medeben" && <span className="badge badge-blue" style={{fontSize:9}}>ciclo actual</span>}
                       {hasOwed && !ex.paid && (
                         <span className="badge badge-amber">✋ {(ex.owed||[]).map(p=>p.name||"Alguien").join(", ")} debe {fmt(owedAmt)}</span>
                       )}
@@ -559,13 +629,15 @@ export default function App() {
 
                   <div style={{textAlign:"right",flexShrink:0}}>
                     <div style={{fontSize:16,fontWeight:700}}>{fmt(ex.amount)}</div>
-                    {hasOwed && !ex.paid && <div style={{fontSize:11,color:"#b45309",fontWeight:500}}>cobras {fmt(owedAmt)}</div>}
+                    {hasOwed && !ex.paid && <div style={{fontSize:12,color:"#b45309",fontWeight:600}}>cobras {fmt(owedAmt)}</div>}
                     {hasOwed && <div style={{fontSize:11,color:"#059669",fontWeight:500}}>neto {fmt(ex.amount-owedAmt)}</div>}
-                    <div style={{marginTop:4}}>
-                      <span className={`badge ${ex.added?"badge-blue":"badge-gray"}`}>
-                        {ex.added?"💳":"○"} {ex.added?"ingresado":"pendiente"}
-                      </span>
-                    </div>
+                    {filter !== "medeben" && (
+                      <div style={{marginTop:4}}>
+                        <span className={`badge ${ex.added?"badge-blue":"badge-gray"}`}>
+                          {ex.added?"💳":"○"} {ex.added?"ingresado":"pendiente"}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
@@ -576,10 +648,19 @@ export default function App() {
               );
             })}
 
-            {expenses.some(e=>!e.added) && (
+            {/* Bulk ingresado */}
+            {filter !== "medeben" && expenses.some(e=>!e.added) && (
               <button className="btn btn-g" style={{width:"100%",marginTop:14,borderStyle:"dashed",fontSize:12,padding:"13px"}}
                 onClick={()=>setExpenses(ex=>ex.map(e=>({...e,added:true})))}>
                 Marcar todos como ingresados ({fmt(expenses.filter(e=>!e.added).reduce((s,e)=>s+e.amount,0))})
+              </button>
+            )}
+
+            {/* Bulk pagados — solo en vista me deben */}
+            {filter === "medeben" && meDeben.length > 0 && (
+              <button className="btn btn-amber" style={{width:"100%",marginTop:14,fontSize:13,padding:"14px"}}
+                onClick={()=>setConfirmBulkPaid(true)}>
+                ✋ Marcar todos como pagados · {fmt(meDebenTotal)}
               </button>
             )}
           </>}
@@ -593,26 +674,54 @@ export default function App() {
                 Sin gastos para resumir aún.
               </div>
             )}
-            {months.map(month => {
+            {months.map((month, monthIdx) => {
               const monthExps = expenses.filter(e=>getMonth(e.date)===month);
               const total = monthExps.reduce((s,e)=>s+e.amount,0);
               const pending = monthExps.filter(e=>!e.added).reduce((s,e)=>s+e.amount,0);
               const owedTotal = monthExps.reduce((s,e)=>s+owedForExp(e),0);
               const net = total - owedTotal;
+
+              // Previous month comparison
+              const prevMonth = months[monthIdx + 1];
+              const prevExps = prevMonth ? expenses.filter(e=>getMonth(e.date)===prevMonth) : [];
+              const prevTotal = prevExps.reduce((s,e)=>s+e.amount,0);
+              const diff = total - prevTotal;
+              const diffPct = prevTotal > 0 ? Math.abs(diff/prevTotal*100).toFixed(0) : null;
+
+              // Categories with %
               const catMap = {};
               monthExps.forEach(e=>{ const cat=e.category||"📦 Otro"; catMap[cat]=(catMap[cat]||0)+e.amount; });
-              const topCats = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,4);
+              const topCats = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+              // Top 3 individual expenses
+              const top3 = [...monthExps].sort((a,b)=>b.amount-a.amount).slice(0,3);
 
               return (
                 <div key={month} className="card" style={{marginBottom:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                    <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>{month}</div>
+                  {/* Header */}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+                    <div>
+                      <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>{month}</div>
+                      {/* Month comparison */}
+                      {diffPct !== null && (
+                        <div style={{display:"flex",alignItems:"center",gap:4,marginTop:4}}>
+                          <span style={{fontSize:12,fontWeight:700,color:diff>0?"#dc2626":"#059669"}}>
+                            {diff>0?"↑":"↓"} {fmt(Math.abs(diff))}
+                          </span>
+                          <span style={{fontSize:11,color:"#94a3b8"}}>
+                            ({diffPct}% {diff>0?"más":"menos"} que {prevMonth})
+                          </span>
+                        </div>
+                      )}
+                    </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontSize:22,fontWeight:700,color:"#0f4c81"}}>{fmt(total)}</div>
                       <div style={{fontSize:11,color:"#94a3b8"}}>neto {fmt(net)}</div>
                     </div>
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:topCats.length>0?12:0}}>
+
+                  {/* Stats row */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16}}>
                     <div style={{background:"#f8fafc",borderRadius:8,padding:"8px 10px"}}>
                       <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,fontWeight:600,marginBottom:2}}>GASTOS</div>
                       <div style={{fontSize:15,fontWeight:700}}>{monthExps.length}</div>
@@ -626,18 +735,41 @@ export default function App() {
                       <div style={{fontSize:15,fontWeight:700,color:"#b45309"}}>{fmt(owedTotal)}</div>
                     </div>
                   </div>
+
+                  {/* Categories with % */}
                   {topCats.length>0 && (
-                    <div>
-                      <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,fontWeight:600,marginBottom:8}}>TOP CATEGORÍAS</div>
-                      {topCats.map(([cat,amt])=>(
-                        <div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
-                          <div style={{fontSize:12,color:"#64748b"}}>{cat}</div>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <div style={{width:60,height:4,background:"#f1f5f9",borderRadius:2,overflow:"hidden"}}>
-                              <div style={{width:`${Math.min(100,(amt/total)*100)}%`,height:"100%",background:"#0f4c81",borderRadius:2}}></div>
+                    <div style={{marginBottom:16}}>
+                      <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,fontWeight:600,marginBottom:10}}>CATEGORÍAS</div>
+                      {topCats.map(([cat,amt])=>{
+                        const pct = total>0 ? Math.round(amt/total*100) : 0;
+                        return (
+                          <div key={cat} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                            <div style={{fontSize:12,color:"#64748b",width:90,flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cat}</div>
+                            <div style={{flex:1,height:6,background:"#f1f5f9",borderRadius:3,overflow:"hidden"}}>
+                              <div style={{width:`${pct}%`,height:"100%",background:"linear-gradient(90deg,#0f4c81,#1e6ab0)",borderRadius:3,transition:"width .3s"}}></div>
                             </div>
-                            <div style={{fontSize:12,fontWeight:600,minWidth:52,textAlign:"right"}}>{fmt(amt)}</div>
+                            <div style={{fontSize:11,color:"#94a3b8",fontWeight:600,width:28,textAlign:"right",flexShrink:0}}>{pct}%</div>
+                            <div style={{fontSize:12,fontWeight:700,width:58,textAlign:"right",flexShrink:0}}>{fmt(amt)}</div>
                           </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Top 3 gastos */}
+                  {top3.length>0 && (
+                    <div>
+                      <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,fontWeight:600,marginBottom:10}}>TOP GASTOS DEL MES</div>
+                      {top3.map((ex,i)=>(
+                        <div key={ex.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:i===0?"#eff6ff":i===1?"#f8fafc":"#fafafa",borderRadius:8,marginBottom:6}}>
+                          <div style={{width:20,height:20,borderRadius:"50%",background:i===0?"#0f4c81":i===1?"#64748b":"#94a3b8",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                            <span style={{color:"#fff",fontSize:10,fontWeight:700}}>{i+1}</span>
+                          </div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ex.desc}</div>
+                            <div style={{fontSize:10,color:"#94a3b8"}}>{ex.date}{ex.category?" · "+ex.category:""}</div>
+                          </div>
+                          <div style={{fontSize:14,fontWeight:700,color:i===0?"#0f4c81":"#0f172a",flexShrink:0}}>{fmt(ex.amount)}</div>
                         </div>
                       ))}
                     </div>
