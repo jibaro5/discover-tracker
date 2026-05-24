@@ -114,6 +114,7 @@ function catDisplay(c) {
   const key = Object.keys(CAT_EMOJI).find(k => c.toLowerCase().includes(k.toLowerCase()));
   return key ? `${CAT_EMOJI[key]} ${key}` : c;
 }
+
 const EMPTY_FORM = { desc:"", amount:"", date:today(), category:"", owed:[] };
 
 export default function App() {
@@ -152,10 +153,10 @@ export default function App() {
             desc: String(e.desc||""),
             amount: amt,
             date: dateVal,
-            category: e.category||"",
+            category: String(e.category||""),
             owed: parseOwedStr(e.owed),
-            added: e.added===true||e.added==="SI",
-            paid: e.paid===true||e.paid==="SI",
+            added: e.added === true || String(e.added).toUpperCase().trim() === "SI",
+            paid: e.paid === true || String(e.paid).toUpperCase().trim() === "SI",
           });
         } catch(err) { console.warn("Skipping row", i, err); }
       }
@@ -237,7 +238,7 @@ export default function App() {
       for (const exp of unpaidWithOwed) {
         await sheetUpdateStatus({...exp, paid:true});
       }
-      showToast(`${unpaidWithOwed.length} gastos marcados como pagados ✓`);
+      showToast(`${unpaidWithOwed.length} gastos marcados como pagados`);
     } catch { showToast("Error al actualizar","warn"); }
     setSyncing(false);
   }
@@ -266,11 +267,8 @@ export default function App() {
   const cyclePending = cycleExpenses.filter(e=>!e.added).reduce((s,e)=>s+e.amount,0);
   const totalOwed = expenses.filter(e=>!e.paid).reduce((s,e)=>s+owedForExp(e),0);
   const netCost = cycleExpenses.reduce((s,e)=>s+(e.amount-owedForExp(e)),0);
-
   const months = [...new Set(expenses.map(e=>getMonth(e.date)))].sort().reverse();
   const availableMonths = [...new Set(expenses.map(e=>getMonth(e.date)))].sort().reverse();
-
-  // Me deben filter — gastos con owed sin pagar
   const meDeben = expenses.filter(e => owedForExp(e) > 0 && !e.paid);
   const meDebenTotal = meDeben.reduce((s,e)=>s+owedForExp(e),0);
 
@@ -347,7 +345,6 @@ export default function App() {
         @media(max-width:640px){.sg{grid-template-columns:1fr 1fr!important;}}
       `}</style>
 
-      {/* Delete modal */}
       {confirmDelete && (
         <div className="modal-overlay" onClick={()=>setConfirmDelete(null)}>
           <div className="modal" onClick={e=>e.stopPropagation()}>
@@ -362,33 +359,25 @@ export default function App() {
         </div>
       )}
 
-      {/* Bulk paid confirmation */}
       {confirmBulkPaid && (
         <div className="modal-overlay" onClick={()=>setConfirmBulkPaid(false)}>
           <div className="modal" onClick={e=>e.stopPropagation()}>
             <div style={{fontSize:11,letterSpacing:2,color:"#b45309",marginBottom:12,fontWeight:700}}>MARCAR TODOS COMO PAGADOS</div>
             <div style={{fontSize:15,marginBottom:8,fontWeight:600}}>{meDeben.length} gastos · {fmt(meDebenTotal)}</div>
-            <div style={{fontSize:13,color:"#64748b",marginBottom:24}}>
-              Esto marcará todos los gastos pendientes de cobro como pagados en la app y en el Sheet.
-            </div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:24}}>Esto marcará todos los pendientes de cobro como pagados.</div>
             <div style={{display:"flex",gap:8}}>
-              <button className="btn btn-amber" style={{flex:1}} onClick={markAllPaid}>
-                ✓ Sí, todos pagados
-              </button>
+              <button className="btn btn-amber" style={{flex:1}} onClick={markAllPaid}>✓ Sí, todos pagados</button>
               <button className="btn btn-g" onClick={()=>setConfirmBulkPaid(false)}>Cancelar</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Add/Edit form sheet */}
       {showForm && (
         <div className="overlay" onClick={cancelEdit}>
           <div className="sheet" onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-              <div style={{fontSize:16,fontWeight:700,color:editId?"#0f4c81":"#0f172a"}}>
-                {editId?"Editar gasto":"Nuevo gasto"}
-              </div>
+              <div style={{fontSize:16,fontWeight:700,color:editId?"#0f4c81":"#0f172a"}}>{editId?"Editar gasto":"Nuevo gasto"}</div>
               <button className="btn btn-g btn-sm" onClick={cancelEdit}>✕</button>
             </div>
             <form onSubmit={submitForm}>
@@ -399,23 +388,18 @@ export default function App() {
                   min="0.01" step="0.01" onChange={e=>setForm(f=>({...f,amount:e.target.value}))} required />
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-                <input className="inp" type="date" value={form.date}
-                  onChange={e=>setForm(f=>({...f,date:e.target.value}))} />
-                <select className="sel" value={form.category}
-                  onChange={e=>setForm(f=>({...f,category:e.target.value}))}>
+                <input className="inp" type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} />
+                <select className="sel" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>
                   <option value="">Sin categoría</option>
                   {CATEGORIES.map(c=><option key={c} value={c}>{CAT_EMOJI[c]||""} {c}</option>)}
                 </select>
               </div>
-
               <div style={{background:"#fffbeb",border:"1.5px solid #fde68a",borderRadius:12,padding:"14px 16px",marginBottom:16}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
                   <div style={{fontSize:12,fontWeight:700,color:"#b45309"}}>💰 ME DEBEN</div>
                   <button type="button" className="btn btn-g btn-sm" onClick={addPerson} style={{fontSize:11}}>+ agregar</button>
                 </div>
-                {form.owed.length===0 && (
-                  <div style={{fontSize:12,color:"#92400e",opacity:.6}}>Nadie te debe en este gasto.</div>
-                )}
+                {form.owed.length===0 && <div style={{fontSize:12,color:"#92400e",opacity:.6}}>Nadie te debe en este gasto.</div>}
                 {form.owed.map((p,i)=>(
                   <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
                     <input className="inp" placeholder="Nombre (opcional)" value={p.name}
@@ -437,7 +421,6 @@ export default function App() {
                   </div>
                 )}
               </div>
-
               <button type="submit" className="btn btn-p" style={{width:"100%",padding:"13px"}} disabled={syncing}>
                 {syncing?"Guardando...":editId?"Guardar cambios":"Agregar gasto"}
               </button>
@@ -446,7 +429,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Header */}
       <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"0 20px",position:"sticky",top:0,zIndex:100}}>
         <div style={{maxWidth:720,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",height:58}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -472,8 +454,6 @@ export default function App() {
       </div>
 
       <div style={{maxWidth:720,margin:"0 auto",padding:"20px 16px 100px"}}>
-
-        {/* Cycle banner */}
         <div style={{background:`linear-gradient(135deg,${cycle.isUrgent?"#dc2626,#b91c1c":"#0f4c81,#1e6ab0"})`,borderRadius:14,padding:"20px 24px",color:"#fff",marginBottom:16}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
             <div>
@@ -483,7 +463,7 @@ export default function App() {
                 💳 Vence: {cycle.due}
                 {cycle.daysUntilDue <= 10 && (
                   <span style={{marginLeft:8,background:"rgba(255,255,255,.2)",padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:700}}>
-                    {cycle.daysUntilDue <= 0?"¡VENCIDO!":cycle.daysUntilDue===1?"¡Mañana!":cycle.daysUntilDue===0?"¡Hoy!":`${cycle.daysUntilDue}d`}
+                    {cycle.daysUntilDue<=0?"¡VENCIDO!":cycle.daysUntilDue===1?"¡Mañana!":`${cycle.daysUntilDue}d`}
                   </span>
                 )}
               </div>
@@ -509,32 +489,21 @@ export default function App() {
           </div>
         </div>
 
-        {/* Nav tabs */}
         <div style={{display:"flex",background:"#e2e8f0",borderRadius:12,padding:"4px",gap:4,marginBottom:20}}>
-          <button className={`nav-tab ${tab==="list"?"on":""}`} style={{flex:1,justifyContent:"center"}} onClick={()=>setTab("list")}>
-            📋 Gastos
-          </button>
-          <button className={`nav-tab ${tab==="summary"?"on":""}`} style={{flex:1,justifyContent:"center"}} onClick={()=>setTab("summary")}>
-            📊 Resumen
-          </button>
+          <button className={`nav-tab ${tab==="list"?"on":""}`} style={{flex:1,justifyContent:"center"}} onClick={()=>setTab("list")}>📋 Gastos</button>
+          <button className={`nav-tab ${tab==="summary"?"on":""}`} style={{flex:1,justifyContent:"center"}} onClick={()=>setTab("summary")}>📊 Resumen</button>
         </div>
 
-        {/* ── GASTOS TAB ── */}
         {tab==="list" && <>
-          {/* Filters */}
           <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#e2e8f0",borderRadius:20,padding:"3px",gap:2}}>
               {[["all","Todos"],["pending","Pendientes"],["added","Ingresados"]].map(([v,l])=>(
-                <button key={v} className={`tog ${filter===v?"on":""}`} style={{padding:"6px 12px",fontSize:11}}
-                  onClick={()=>setFilter(v)}>{l}</button>
+                <button key={v} className={`tog ${filter===v?"on":""}`} style={{padding:"6px 12px",fontSize:11}} onClick={()=>setFilter(v)}>{l}</button>
               ))}
-              <button
-                className={`tog ${filter==="medeben"?"on-amber":""}`}
-                style={{padding:"6px 12px",fontSize:11,display:"flex",alignItems:"center",gap:4}}
-                onClick={()=>setFilter("medeben")}>
+              <button className={`tog ${filter==="medeben"?"on-amber":""}`} style={{padding:"6px 12px",fontSize:11,display:"flex",alignItems:"center",gap:4}} onClick={()=>setFilter("medeben")}>
                 ✋ Me deben
                 {meDeben.length > 0 && (
-                  <span style={{background:filter==="medeben"?"rgba(255,255,255,.3)":"#b45309",color:"#fff",borderRadius:20,padding:"0px 6px",fontSize:10,fontWeight:700,minWidth:18,textAlign:"center"}}>
+                  <span style={{background:filter==="medeben"?"rgba(255,255,255,.3)":"#b45309",color:"#fff",borderRadius:20,padding:"0px 6px",fontSize:10,fontWeight:700}}>
                     {meDeben.length}
                   </span>
                 )}
@@ -550,13 +519,12 @@ export default function App() {
             <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8",fontWeight:500}}>{filtered.length}</span>
           </div>
 
-          {/* Me deben banner */}
           {filter === "medeben" && meDeben.length > 0 && (
             <div className="medeben-banner">
               <div>
                 <div style={{fontSize:10,letterSpacing:2,opacity:.8,fontWeight:600,marginBottom:4}}>TOTAL POR COBRAR</div>
                 <div style={{fontFamily:"'Playfair Display',serif",fontSize:26,fontWeight:700}}>{fmt(meDebenTotal)}</div>
-                <div style={{fontSize:11,opacity:.8,marginTop:2}}>{meDeben.length} gastos pendientes de cobro</div>
+                <div style={{fontSize:11,opacity:.8,marginTop:2}}>{meDeben.length} gastos pendientes</div>
               </div>
               <button className="btn" style={{background:"rgba(255,255,255,.2)",color:"#fff",border:"1.5px solid rgba(255,255,255,.4)",fontSize:12,padding:"10px 16px"}}
                 onClick={()=>setConfirmBulkPaid(true)}>
@@ -565,7 +533,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Legend */}
           {filter !== "medeben" && (
             <div style={{display:"flex",gap:12,marginBottom:14,fontSize:11,color:"#94a3b8",fontWeight:500}}>
               <div style={{display:"flex",alignItems:"center",gap:5}}>
@@ -592,12 +559,9 @@ export default function App() {
             {filtered.length===0 && (
               <div style={{textAlign:"center",padding:"60px 0",fontSize:13}}>
                 <div style={{fontSize:32,marginBottom:12}}>{filter==="medeben"?"🎉":"📭"}</div>
-                <div style={{color:"#cbd5e1"}}>
-                  {filter==="medeben"?"¡Nadie te debe nada!":"Sin gastos aquí."}
-                </div>
+                <div style={{color:"#cbd5e1"}}>{filter==="medeben"?"¡Nadie te debe nada!":"Sin gastos aquí."}</div>
               </div>
             )}
-
             {filtered.map(ex => {
               const owedAmt = owedForExp(ex);
               const hasOwed = owedAmt > 0;
@@ -606,33 +570,27 @@ export default function App() {
               return (
                 <div key={ex.id} className={`row ${fullyDone?"dim":""} ${filter==="medeben"?"owed-highlight":""}`}>
                   <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,paddingTop:2}}>
-                    <div className={`chk blue ${ex.added?"on":""}`} onClick={()=>toggleField(ex.id,"added")} title="💳 Ingresado a cuenta">
+                    <div className={`chk blue ${ex.added?"on":""}`} onClick={()=>toggleField(ex.id,"added")} title="💳 Ingresado">
                       {ex.added && <span style={{fontSize:11,color:"#fff",fontWeight:800}}>✓</span>}
                     </div>
                     {hasOwed && (
-                      <div className={`chk green ${ex.paid?"on":""}`} onClick={()=>toggleField(ex.id,"paid")} title="✋ Me pagaron">
+                      <div className={`chk green ${ex.paid?"on":""}`} onClick={()=>toggleField(ex.id,"paid")} title="✋ Pagado">
                         {ex.paid && <span style={{fontSize:11,color:"#fff",fontWeight:800}}>✓</span>}
                       </div>
                     )}
                   </div>
-
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
                       <div style={{fontSize:14,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ex.desc}</div>
-                      {ex.category && <span style={{fontSize:12,color:"#64748b",flexShrink:0,background:"#f1f5f9",padding:"2px 6px",borderRadius:4}}>{catDisplay(ex.category)}</span>}
+                      {ex.category && <span style={{fontSize:11,color:"#64748b",flexShrink:0,background:"#f1f5f9",padding:"2px 6px",borderRadius:4}}>{catDisplay(ex.category)}</span>}
                     </div>
                     <div style={{fontSize:11,color:"#94a3b8",display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
                       <span>{ex.date}</span>
                       {inCycle && filter!=="medeben" && <span className="badge badge-blue" style={{fontSize:9}}>ciclo actual</span>}
-                      {hasOwed && !ex.paid && (
-                        <span className="badge badge-amber">✋ {(ex.owed||[]).map(p=>p.name||"Alguien").join(", ")} debe {fmt(owedAmt)}</span>
-                      )}
-                      {hasOwed && ex.paid && (
-                        <span className="badge badge-green">✓ Cobrado {fmt(owedAmt)}</span>
-                      )}
+                      {hasOwed && !ex.paid && <span className="badge badge-amber">✋ {(ex.owed||[]).map(p=>p.name||"Alguien").join(", ")} debe {fmt(owedAmt)}</span>}
+                      {hasOwed && ex.paid && <span className="badge badge-green">✓ Cobrado {fmt(owedAmt)}</span>}
                     </div>
                   </div>
-
                   <div style={{textAlign:"right",flexShrink:0}}>
                     <div style={{fontSize:16,fontWeight:700}}>{fmt(ex.amount)}</div>
                     {hasOwed && !ex.paid && <div style={{fontSize:12,color:"#b45309",fontWeight:600}}>cobras {fmt(owedAmt)}</div>}
@@ -645,7 +603,6 @@ export default function App() {
                       </div>
                     )}
                   </div>
-
                   <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
                     <button className="btn btn-g btn-sm" style={{padding:"6px 8px"}} onClick={()=>startEdit(ex)}>✏️</button>
                     <button className="btn btn-d btn-sm" style={{padding:"6px 8px"}} onClick={()=>setConfirmDelete(ex)}>🗑</button>
@@ -653,16 +610,12 @@ export default function App() {
                 </div>
               );
             })}
-
-            {/* Bulk ingresado */}
             {filter !== "medeben" && expenses.some(e=>!e.added) && (
               <button className="btn btn-g" style={{width:"100%",marginTop:14,borderStyle:"dashed",fontSize:12,padding:"13px"}}
                 onClick={()=>setExpenses(ex=>ex.map(e=>({...e,added:true})))}>
                 Marcar todos como ingresados ({fmt(expenses.filter(e=>!e.added).reduce((s,e)=>s+e.amount,0))})
               </button>
             )}
-
-            {/* Bulk pagados — solo en vista me deben */}
             {filter === "medeben" && meDeben.length > 0 && (
               <button className="btn btn-amber" style={{width:"100%",marginTop:14,fontSize:13,padding:"14px"}}
                 onClick={()=>setConfirmBulkPaid(true)}>
@@ -672,51 +625,32 @@ export default function App() {
           </>}
         </>}
 
-        {/* ── RESUMEN TAB ── */}
         {tab==="summary" && (
           <div>
-            {months.length===0 && (
-              <div style={{textAlign:"center",padding:"60px 0",color:"#cbd5e1",fontSize:13}}>
-                Sin gastos para resumir aún.
-              </div>
-            )}
+            {months.length===0 && <div style={{textAlign:"center",padding:"60px 0",color:"#cbd5e1",fontSize:13}}>Sin gastos para resumir aún.</div>}
             {months.map((month, monthIdx) => {
               const monthExps = expenses.filter(e=>getMonth(e.date)===month);
               const total = monthExps.reduce((s,e)=>s+e.amount,0);
               const pending = monthExps.filter(e=>!e.added).reduce((s,e)=>s+e.amount,0);
               const owedTotal = monthExps.reduce((s,e)=>s+owedForExp(e),0);
               const net = total - owedTotal;
-
-              // Previous month comparison
               const prevMonth = months[monthIdx + 1];
-              const prevExps = prevMonth ? expenses.filter(e=>getMonth(e.date)===prevMonth) : [];
-              const prevTotal = prevExps.reduce((s,e)=>s+e.amount,0);
+              const prevTotal = prevMonth ? expenses.filter(e=>getMonth(e.date)===prevMonth).reduce((s,e)=>s+e.amount,0) : 0;
               const diff = total - prevTotal;
               const diffPct = prevTotal > 0 ? Math.abs(diff/prevTotal*100).toFixed(0) : null;
-
-              // Categories with %
               const catMap = {};
               monthExps.forEach(e=>{ const cat=catDisplay(e.category||"Otro"); catMap[cat]=(catMap[cat]||0)+e.amount; });
               const topCats = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
-
-              // Top 3 individual expenses
               const top3 = [...monthExps].sort((a,b)=>b.amount-a.amount).slice(0,3);
-
               return (
                 <div key={month} className="card" style={{marginBottom:12}}>
-                  {/* Header */}
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
                     <div>
                       <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>{month}</div>
-                      {/* Month comparison */}
                       {diffPct !== null && (
                         <div style={{display:"flex",alignItems:"center",gap:4,marginTop:4}}>
-                          <span style={{fontSize:12,fontWeight:700,color:diff>0?"#dc2626":"#059669"}}>
-                            {diff>0?"↑":"↓"} {fmt(Math.abs(diff))}
-                          </span>
-                          <span style={{fontSize:11,color:"#94a3b8"}}>
-                            ({diffPct}% {diff>0?"más":"menos"} que {prevMonth})
-                          </span>
+                          <span style={{fontSize:12,fontWeight:700,color:diff>0?"#dc2626":"#059669"}}>{diff>0?"↑":"↓"} {fmt(Math.abs(diff))}</span>
+                          <span style={{fontSize:11,color:"#94a3b8"}}>({diffPct}% {diff>0?"más":"menos"} que {prevMonth})</span>
                         </div>
                       )}
                     </div>
@@ -725,8 +659,6 @@ export default function App() {
                       <div style={{fontSize:11,color:"#94a3b8"}}>neto {fmt(net)}</div>
                     </div>
                   </div>
-
-                  {/* Stats row */}
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16}}>
                     <div style={{background:"#f8fafc",borderRadius:8,padding:"8px 10px"}}>
                       <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,fontWeight:600,marginBottom:2}}>GASTOS</div>
@@ -741,8 +673,6 @@ export default function App() {
                       <div style={{fontSize:15,fontWeight:700,color:"#b45309"}}>{fmt(owedTotal)}</div>
                     </div>
                   </div>
-
-                  {/* Categories with % */}
                   {topCats.length>0 && (
                     <div style={{marginBottom:16}}>
                       <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,fontWeight:600,marginBottom:10}}>CATEGORÍAS</div>
@@ -750,22 +680,20 @@ export default function App() {
                         const pct = total>0 ? Math.round(amt/total*100) : 0;
                         return (
                           <div key={cat} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                            <div style={{fontSize:12,color:"#64748b",width:90,flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cat}</div>
+                            <div style={{fontSize:12,color:"#64748b",width:100,flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cat}</div>
                             <div style={{flex:1,height:6,background:"#f1f5f9",borderRadius:3,overflow:"hidden"}}>
-                              <div style={{width:`${pct}%`,height:"100%",background:"linear-gradient(90deg,#0f4c81,#1e6ab0)",borderRadius:3,transition:"width .3s"}}></div>
+                              <div style={{width:`${pct}%`,height:"100%",background:"linear-gradient(90deg,#0f4c81,#1e6ab0)",borderRadius:3}}></div>
                             </div>
                             <div style={{fontSize:11,color:"#94a3b8",fontWeight:600,width:28,textAlign:"right",flexShrink:0}}>{pct}%</div>
-                            <div style={{fontSize:12,fontWeight:700,width:58,textAlign:"right",flexShrink:0}}>{fmt(amt)}</div>
+                            <div style={{fontSize:12,fontWeight:700,width:60,textAlign:"right",flexShrink:0}}>{fmt(amt)}</div>
                           </div>
                         );
                       })}
                     </div>
                   )}
-
-                  {/* Top 3 gastos */}
                   {top3.length>0 && (
                     <div>
-                      <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,fontWeight:600,marginBottom:10}}>TOP GASTOS DEL MES</div>
+                      <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,fontWeight:600,marginBottom:10}}>TOP GASTOS</div>
                       {top3.map((ex,i)=>(
                         <div key={ex.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:i===0?"#eff6ff":i===1?"#f8fafc":"#fafafa",borderRadius:8,marginBottom:6}}>
                           <div style={{width:20,height:20,borderRadius:"50%",background:i===0?"#0f4c81":i===1?"#64748b":"#94a3b8",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
@@ -788,9 +716,7 @@ export default function App() {
       </div>
 
       {!showForm && tab==="list" && (
-        <button className="fab" onClick={()=>{setEditId(null);setForm(EMPTY_FORM);setShowForm(true);setTimeout(()=>descRef.current?.focus(),200);}}>
-          +
-        </button>
+        <button className="fab" onClick={()=>{setEditId(null);setForm(EMPTY_FORM);setShowForm(true);setTimeout(()=>descRef.current?.focus(),200);}}>+</button>
       )}
 
       {toast && <div className={`toast ${toast.type==="warn"?"twarn":"tok"}`}>{toast.msg}</div>}
