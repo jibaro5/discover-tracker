@@ -8,21 +8,22 @@ export default async function handler(req, res) {
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwYQE4ALmgPj42yDxBcFlHiT0XFW6UijiRBz3DeBUmWH9k76wGl6QwH1_L-Y7XBj8Rc/exec";
 
   try {
-    const body = req.method === "POST"
-      ? (typeof req.body === "string" ? JSON.parse(req.body) : req.body)
-      : {};
-
-    const action = req.method === "GET"
-      ? (req.query.action || "read")
-      : (body.action || "read");
-
     const params = new URLSearchParams();
-    params.set("action", action);
 
-    if (req.method === "POST" && body) {
-      Object.entries(body).forEach(([k, v]) => {
-        if (k !== "action") params.set(k, String(v));
-      });
+    if (req.method === "GET") {
+      params.set("action", req.query.action || "read");
+    } else {
+      const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+      // Explicitly map every field
+      params.set("action", body.action || "read");
+      if (body.desc !== undefined) params.set("desc", String(body.desc));
+      if (body.amount !== undefined) params.set("amount", String(body.amount));
+      if (body.date !== undefined) params.set("date", String(body.date));
+      if (body.category !== undefined) params.set("category", String(body.category));
+      if (body.owed !== undefined) params.set("owed", String(body.owed));
+      if (body.id !== undefined) params.set("id", String(body.id));
+      if (body.added !== undefined) params.set("added", String(body.added));
+      if (body.paid !== undefined) params.set("paid", String(body.paid));
     }
 
     const response = await fetch(`${SCRIPT_URL}?${params.toString()}`, {
