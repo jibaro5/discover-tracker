@@ -5,8 +5,7 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
 
-  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwYQE4ALmgPj42yDxBcFlHiT0XFW6UijiRBz3DeBUmWH9k76wGl6QwH1_L-Y7XBj8Rc/exec";
-
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxgu19FoL21iMLj6rQPuJtq0oprfB6GCySBiVGn1N0d_O_Icahqq7WIHdX5_yzetAsj;
   try {
     const params = new URLSearchParams();
 
