@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-const SCRIPT_URL = "/api/sheet";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxgu19FoL21iMLj6rQPuJtq0oprfB6GCySBiVGn1N0d_O_Icahqq7WIHdX5_yzetAsj/exec";
 const CLOSE_DAY = 20;
 const DUE_DAY = 17;
 
