@@ -723,5 +723,3 @@ export default function App() {
     </div>
   );
 }
-
-const CLOSE_DAY = 20;
