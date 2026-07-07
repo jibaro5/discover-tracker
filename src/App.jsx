@@ -185,6 +185,25 @@ export default function App() {
   function removePerson(i) { setForm(f=>({...f,owed:f.owed.filter((_,j)=>j!==i)})); }
   function updatePerson(i,k,v) { setForm(f=>({...f,owed:f.owed.map((p,j)=>j===i?{...p,[k]:v}:p)})); }
 
+  async function sheetEdit(expense) {
+  const owedStr = (expense.owed||[]).map(p => {
+    const amt = calcOwedAmt(p, expense.amount).toFixed(2);
+    return p.name ? `${p.name}: $${amt}` : `$${amt}`;
+  }).join(", ");
+  await fetch(SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "edit",
+      id: String(expense.sheetId),
+      desc: expense.desc,
+      amount: expense.amount,
+      date: expense.date,
+      category: expense.category || "",
+      owed: owedStr,
+    }),
+  });
+}
   async function submitForm(e) {
     e.preventDefault();
     if (!form.desc.trim()||!form.amount) return;
@@ -203,20 +222,24 @@ export default function App() {
       paid: editId?(expenses.find(x=>x.id===editId)?.paid??false):false,
     };
    if (editId) {
-  setExpenses(ex=>ex.map(x=>x.id===editId?expense:x));
-  setSyncing(true);
-  try {
-    await sheetEdit(expense);
-    showToast("Gasto actualizado");
-  } catch { showToast("Error al actualizar","warn"); }
-  setSyncing(false);
-  setEditId(null);
-} else {
-  setExpenses(ex=>[expense,...ex]);
-  setSyncing(true);
-  try { await sheetAppend(expense); showToast("Guardado en Sheet"); }
-  catch { showToast("Error al guardar","warn"); }
-  setSyncing(false);
+      setExpenses(ex=>ex.map(x=>x.id===editId?expense:x));
+      setSyncing(true);
+      try {
+        await sheetEdit(expense);
+        showToast("Gasto actualizado");
+      } catch { showToast("Error al actualizar","warn"); }
+      setSyncing(false);
+      setEditId(null);
+    } else {
+      setExpenses(ex=>[expense,...ex]);
+      setSyncing(true);
+      try { await sheetAppend(expense); showToast("Guardado en Sheet"); }
+      catch { showToast("Error al guardar","warn"); }
+      setSyncing(false);
+    }
+    setForm(EMPTY_FORM);
+    setShowForm(false);
+  }
 }
 setForm(EMPTY_FORM);
 setShowForm(false);
