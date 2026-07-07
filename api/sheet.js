@@ -5,7 +5,7 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
-  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxgu19FoL21iMLj6rQPuJtq0oprfB6GCySBiVGn1N0d_O_Icahqq7WIHdX5_yzetAsj/exec";
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxHivJmMn43V_dB471sA97X2tbZ7VqrDQuxkIAvLXJAw_zFcPhxLf-VraMoUVwFbkPm/exec";
   try {
     const params = new URLSearchParams();
     if (req.method === "GET") {
