@@ -202,20 +202,24 @@ export default function App() {
       added: editId?(expenses.find(x=>x.id===editId)?.added??false):false,
       paid: editId?(expenses.find(x=>x.id===editId)?.paid??false):false,
     };
-    if (editId) {
-      setExpenses(ex=>ex.map(x=>x.id===editId?expense:x));
-      setEditId(null);
-      showToast("Gasto actualizado");
-    } else {
-      setExpenses(ex=>[expense,...ex]);
-      setSyncing(true);
-      try { await sheetAppend(expense); showToast("Guardado en Sheet"); }
-      catch { showToast("Error al guardar","warn"); }
-      setSyncing(false);
-    }
-    setForm(EMPTY_FORM);
-    setShowForm(false);
-  }
+   if (editId) {
+  setExpenses(ex=>ex.map(x=>x.id===editId?expense:x));
+  setSyncing(true);
+  try {
+    await sheetEdit(expense);
+    showToast("Gasto actualizado");
+  } catch { showToast("Error al actualizar","warn"); }
+  setSyncing(false);
+  setEditId(null);
+} else {
+  setExpenses(ex=>[expense,...ex]);
+  setSyncing(true);
+  try { await sheetAppend(expense); showToast("Guardado en Sheet"); }
+  catch { showToast("Error al guardar","warn"); }
+  setSyncing(false);
+}
+setForm(EMPTY_FORM);
+setShowForm(false);
 
   async function toggleField(id, field) {
     const updated = expenses.map(x=>x.id===id?{...x,[field]:!x[field]}:x);
