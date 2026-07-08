@@ -240,8 +240,7 @@ export default function App() {
     setForm(EMPTY_FORM);
     setShowForm(false);
   }
-}
-setForm(EMPTY_FORM);
+
 setShowForm(false);
 
   async function toggleField(id, field) {
