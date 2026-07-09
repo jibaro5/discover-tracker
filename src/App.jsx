@@ -66,18 +66,14 @@ async function sheetAppend(expense) {
 }
 
 async function sheetUpdateStatus(expense) {
+  const owedStr = (expense.owed||[]).map(p => {
+    const amt = calcOwedAmt(p, expense.amount).toFixed(2);
+    return p.name ? `${p.name}: $${amt}` : `$${amt}`;
+  }).join(", ");
   await fetch(SCRIPT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: "update",
-      id: String(expense.sheetId),
-      desc: expense.desc,
-      date: expense.date,
-      amount: String(expense.amount),
-      added: String(expense.added),
-      paid: String(expense.paid),
-    }),
+    body: JSON.stringify({ action:"update", id:String(expense.sheetId), desc:expense.desc, date:expense.date, amount:String(expense.amount), added:String(expense.added), paid:String(expense.paid), owed:owedStr }),
   });
 }
 
