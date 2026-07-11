@@ -49,7 +49,6 @@ function owedForExp(ex) {
   if (!ex.owed || !Array.isArray(ex.owed)) return 0;
   return ex.owed.reduce((s,p) => s + (parseFloat(p.value)||0), 0);
 }
-
 function getCycleInfo() {
   const now = new Date();
   const day = now.getDate();
@@ -81,7 +80,6 @@ async function sheetRead() {
   const data = await res.json();
   return data.expenses || [];
 }
-
 async function sheetAppend(expense) {
   const owedStr = (expense.owed||[]).map(p => {
     const amt = calcOwedAmt(p, expense.amount).toFixed(2);
@@ -93,7 +91,6 @@ async function sheetAppend(expense) {
     body: JSON.stringify({ action:"append", desc:expense.desc, amount:expense.amount, date:expense.date, category:expense.category||"", owed:owedStr }),
   });
 }
-
 async function sheetEdit(expense) {
   const owedStr = (expense.owed||[]).map(p => {
     const amt = calcOwedAmt(p, expense.amount).toFixed(2);
@@ -102,18 +99,9 @@ async function sheetEdit(expense) {
   await fetch(SCRIPT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: "edit",
-      id: String(expense.sheetId),
-      desc: expense.desc,
-      amount: expense.amount,
-      date: expense.date,
-      category: expense.category || "",
-      owed: owedStr,
-    }),
+    body: JSON.stringify({ action:"edit", id:String(expense.sheetId), desc:expense.desc, amount:expense.amount, date:expense.date, category:expense.category||"", owed:owedStr }),
   });
 }
-
 async function sheetUpdateStatus(expense) {
   const owedStr = (expense.owed||[]).map(p => {
     const amt = calcOwedAmt(p, expense.amount).toFixed(2);
@@ -125,12 +113,37 @@ async function sheetUpdateStatus(expense) {
     body: JSON.stringify({ action:"update", id:String(expense.sheetId), desc:expense.desc, date:expense.date, amount:String(expense.amount), added:String(expense.added), paid:String(expense.paid), owed:owedStr }),
   });
 }
-
 async function sheetDelete(expense) {
   await fetch(SCRIPT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action:"delete", id:String(expense.sheetId), desc:expense.desc, date:expense.date, amount:String(expense.amount) }),
+  });
+}
+async function recurringRead() {
+  const res = await fetch(`${SCRIPT_URL}?action=recurring-read`);
+  const data = await res.json();
+  return data.items || [];
+}
+async function recurringAppend(item) {
+  await fetch(SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action:"recurring-append", name:item.name, amount:item.amount, day:item.day }),
+  });
+}
+async function recurringEdit(item) {
+  await fetch(SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action:"recurring-edit", id:String(item.sheetId), name:item.name, amount:item.amount, day:item.day }),
+  });
+}
+async function recurringDelete(item) {
+  await fetch(SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action:"recurring-delete", id:String(item.sheetId) }),
   });
 }
 
@@ -142,12 +155,18 @@ function catDisplay(c) {
   return key ? `${CAT_EMOJI[key]} ${key}` : c;
 }
 
-const EMPTY_FORM = { desc:"", amount:"", date:today(), category:"", owed:[] };
+const EMPTY_FORM = { desc:"", amount:"", date:today(), category:"", note:"", owed:[] };
+const EMPTY_REC = { name:"", amount:"", day:"" };
 
 export default function App() {
   const [expenses, setExpenses] = useState([]);
+  const [recurring, setRecurring] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [recForm, setRecForm] = useState(EMPTY_REC);
   const [editId, setEditId] = useState(null);
+  const [editRecId, setEditRecId] = useState(null);
+  const [showRecForm, setShowRecForm] = useState(false);
+  const [showOwed, setShowOwed] = useState(false);
   const [filter, setFilter] = useState("pending");
   const [monthFilter, setMonthFilter] = useState("all");
   const [loading, setLoading] = useState(false);
@@ -155,17 +174,18 @@ export default function App() {
   const [status, setStatus] = useState("idle");
   const [toast, setToast] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmRecDelete, setConfirmRecDelete] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [tab, setTab] = useState("list");
   const [confirmBulkPaid, setConfirmBulkPaid] = useState(false);
   const descRef = useRef();
 
-  useEffect(() => { loadSheet(); }, []);
+  useEffect(() => { loadAll(); }, []);
 
-  async function loadSheet() {
+  async function loadAll() {
     setLoading(true); setStatus("idle");
     try {
-      const rows = await sheetRead();
+      const [rows, recItems] = await Promise.all([sheetRead(), recurringRead()]);
       const normalized = [];
       for (let i = 0; i < rows.length; i++) {
         try {
@@ -181,6 +201,7 @@ export default function App() {
             amount: amt,
             date: dateVal,
             category: String(e.category||""),
+            note: String(e.note||""),
             owed: parseOwedStr(e.owed),
             added: e.added === true || String(e.added).toUpperCase().trim() === "SI",
             paid: e.paid === true || String(e.paid).toUpperCase().trim() === "SI",
@@ -188,6 +209,13 @@ export default function App() {
         } catch(err) { console.warn("Skipping row", i, err); }
       }
       setExpenses(normalized);
+      setRecurring(recItems.map((r,i) => ({
+        id: r.id || String(i),
+        sheetId: r.id,
+        name: r.name,
+        amount: parseAmt(r.amount),
+        day: r.day,
+      })));
       setStatus("ok");
       showToast(`${normalized.length} gastos cargados`);
     } catch(err) {
@@ -207,7 +235,6 @@ export default function App() {
     const base = parseFloat(form.amount)||0;
     return form.owed.reduce((s,p)=>s+calcOwedAmt(p,base),0);
   }
-
   function addPerson() { setForm(f=>({...f,owed:[...f.owed,{name:"",type:"fixed",value:""}]})); }
   function removePerson(i) { setForm(f=>({...f,owed:f.owed.filter((_,j)=>j!==i)})); }
   function updatePerson(i,k,v) { setForm(f=>({...f,owed:f.owed.map((p,j)=>j===i?{...p,[k]:v}:p)})); }
@@ -217,14 +244,12 @@ export default function App() {
     if (!form.desc.trim()||!form.amount) return;
     const base = parseFloat(form.amount);
     const convertedOwed = form.owed.filter(p=>p.value).map(p=>({
-      name: p.name||"",
-      type: "fixed",
-      value: String(calcOwedAmt(p,base).toFixed(2)),
+      name: p.name||"", type:"fixed", value:String(calcOwedAmt(p,base).toFixed(2)),
     }));
     const expense = {
       id: editId??Date.now(),
       sheetId: editId?(expenses.find(x=>x.id===editId)?.sheetId):null,
-      desc:form.desc, amount:base, date:form.date, category:form.category,
+      desc:form.desc, amount:base, date:form.date, category:form.category, note:form.note,
       owed:convertedOwed,
       added: editId?(expenses.find(x=>x.id===editId)?.added??false):false,
       paid: editId?(expenses.find(x=>x.id===editId)?.paid??false):false,
@@ -232,10 +257,8 @@ export default function App() {
     if (editId) {
       setExpenses(ex=>ex.map(x=>x.id===editId?expense:x));
       setSyncing(true);
-      try {
-        await sheetEdit(expense);
-        showToast("Gasto actualizado");
-      } catch { showToast("Error al actualizar","warn"); }
+      try { await sheetEdit(expense); showToast("Gasto actualizado"); }
+      catch { showToast("Error al actualizar","warn"); }
       setSyncing(false);
       setEditId(null);
     } else {
@@ -246,7 +269,64 @@ export default function App() {
       setSyncing(false);
     }
     setForm(EMPTY_FORM);
+    setShowOwed(false);
     setShowForm(false);
+  }
+
+  async function addRecurringToList(rec) {
+    const expense = {
+      id: Date.now(),
+      sheetId: null,
+      desc: rec.name,
+      amount: rec.amount,
+      date: today(),
+      category: "Gastos fijos",
+      note: "",
+      owed: [],
+      added: false,
+      paid: false,
+    };
+    setExpenses(ex=>[expense,...ex]);
+    setSyncing(true);
+    try { await sheetAppend(expense); showToast(`${rec.name} agregado`); }
+    catch { showToast("Error al guardar","warn"); }
+    setSyncing(false);
+  }
+
+  async function submitRecForm(e) {
+    e.preventDefault();
+    if (!recForm.name.trim()||!recForm.amount||!recForm.day) return;
+    const item = {
+      id: editRecId??Date.now(),
+      sheetId: editRecId?(recurring.find(x=>x.id===editRecId)?.sheetId):null,
+      name:recForm.name, amount:parseFloat(recForm.amount), day:recForm.day,
+    };
+    if (editRecId) {
+      setRecurring(r=>r.map(x=>x.id===editRecId?item:x));
+      setSyncing(true);
+      try { await recurringEdit(item); showToast("Gasto fijo actualizado"); }
+      catch { showToast("Error al actualizar","warn"); }
+      setSyncing(false);
+      setEditRecId(null);
+    } else {
+      setRecurring(r=>[...r,item]);
+      setSyncing(true);
+      try { await recurringAppend(item); showToast("Gasto fijo guardado"); }
+      catch { showToast("Error al guardar","warn"); }
+      setSyncing(false);
+    }
+    setRecForm(EMPTY_REC);
+    setShowRecForm(false);
+  }
+
+  async function doDeleteRec() {
+    const item = confirmRecDelete;
+    setConfirmRecDelete(null);
+    setRecurring(r=>r.filter(x=>x.id!==item.id));
+    setSyncing(true);
+    try { await recurringDelete(item); showToast("Eliminado"); }
+    catch { showToast("Error al eliminar","warn"); }
+    setSyncing(false);
   }
 
   async function toggleField(id, field) {
@@ -261,16 +341,14 @@ export default function App() {
 
   async function markAllPaid() {
     setConfirmBulkPaid(false);
-    const unpaidWithOwed = expenses.filter(e => owedForExp(e) > 0 && !e.paid);
-    if (unpaidWithOwed.length === 0) return;
-    const updated = expenses.map(x => owedForExp(x) > 0 && !x.paid ? {...x, paid:true} : x);
+    const unpaid = expenses.filter(e => owedForExp(e) > 0 && !e.paid);
+    if (!unpaid.length) return;
+    const updated = expenses.map(x => owedForExp(x) > 0 && !x.paid ? {...x,paid:true} : x);
     setExpenses(updated);
     setSyncing(true);
     try {
-      for (const exp of unpaidWithOwed) {
-        await sheetUpdateStatus({...exp, paid:true});
-      }
-      showToast(`${unpaidWithOwed.length} gastos marcados como pagados`);
+      for (const exp of unpaid) await sheetUpdateStatus({...exp,paid:true});
+      showToast(`${unpaid.length} gastos marcados como pagados`);
     } catch { showToast("Error al actualizar","warn"); }
     setSyncing(false);
   }
@@ -287,11 +365,18 @@ export default function App() {
 
   function startEdit(ex) {
     setEditId(ex.id);
-    setForm({desc:ex.desc, amount:String(ex.amount), date:ex.date, category:ex.category||"", owed:ex.owed||[]});
+    setForm({desc:ex.desc, amount:String(ex.amount), date:ex.date, category:ex.category||"", note:ex.note||"", owed:ex.owed||[]});
+    setShowOwed((ex.owed||[]).length > 0);
     setShowForm(true);
     setTimeout(()=>descRef.current?.focus(),100);
   }
-  function cancelEdit() { setEditId(null); setForm(EMPTY_FORM); setShowForm(false); }
+  function cancelEdit() { setEditId(null); setForm(EMPTY_FORM); setShowOwed(false); setShowForm(false); }
+
+  function startEditRec(item) {
+    setEditRecId(item.id);
+    setRecForm({name:item.name, amount:String(item.amount), day:String(item.day)});
+    setShowRecForm(true);
+  }
 
   const cycle = getCycleInfo();
   const cycleExpenses = expenses.filter(e => e.date >= cycle.start && e.date <= cycle.end);
@@ -305,9 +390,8 @@ export default function App() {
   const meDebenTotal = meDeben.reduce((s,e)=>s+owedForExp(e),0);
 
   let filtered = expenses;
-  if (filter === "medeben") {
-    filtered = meDeben;
-  } else {
+  if (filter === "medeben") filtered = meDeben;
+  else {
     if (monthFilter !== "all") filtered = filtered.filter(e=>getMonth(e.date)===monthFilter);
     if (filter === "pending") filtered = filtered.filter(e=>!e.added);
     else if (filter === "added") filtered = filtered.filter(e=>e.added);
@@ -320,8 +404,8 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Playfair+Display:wght@700&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;}
-        input,select{outline:none;-webkit-appearance:none;}
-        input:focus,select:focus{border-color:#0f4c81!important;box-shadow:0 0 0 3px rgba(15,76,129,0.12);}
+        input,select,textarea{outline:none;-webkit-appearance:none;}
+        input:focus,select:focus,textarea:focus{border-color:#0f4c81!important;box-shadow:0 0 0 3px rgba(15,76,129,0.12);}
         .inp{background:#fff;border:1.5px solid #e2e8f0;color:#0f172a;padding:11px 14px;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:14px;width:100%;transition:all .15s;}
         .sel{background:#fff;border:1.5px solid #e2e8f0;color:#0f172a;padding:11px 14px;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:14px;width:100%;cursor:pointer;}
         .btn{cursor:pointer;border:none;font-family:'DM Sans',sans-serif;font-size:13px;border-radius:10px;padding:10px 18px;transition:all .15s;font-weight:600;}
@@ -374,6 +458,7 @@ export default function App() {
         .fab{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#0f4c81;color:#fff;border:none;font-size:26px;cursor:pointer;box-shadow:0 4px 16px rgba(15,76,129,.4);display:flex;align-items:center;justify-content:center;transition:all .2s;z-index:100;}
         .fab:hover{transform:scale(1.1);}
         .medeben-banner{background:linear-gradient(135deg,#b45309,#d97706);border-radius:12px;padding:16px 20px;color:#fff;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;}
+        .rec-row{display:flex;align-items:center;gap:10px;padding:11px 14px;background:#fff;border:1.5px solid #e2e8f0;border-radius:10px;margin-bottom:8px;}
         @media(max-width:640px){.sg{grid-template-columns:1fr 1fr!important;}}
       `}</style>
 
@@ -391,12 +476,26 @@ export default function App() {
         </div>
       )}
 
+      {confirmRecDelete && (
+        <div className="modal-overlay" onClick={()=>setConfirmRecDelete(null)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:11,letterSpacing:2,color:"#dc2626",marginBottom:12,fontWeight:700}}>ELIMINAR GASTO FIJO</div>
+            <div style={{fontSize:16,marginBottom:4,fontWeight:600}}>{confirmRecDelete.name}</div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:20}}>{fmt(confirmRecDelete.amount)} · dia {confirmRecDelete.day}</div>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn btn-d" style={{flex:1}} onClick={doDeleteRec}>Eliminar</button>
+              <button className="btn btn-g" onClick={()=>setConfirmRecDelete(null)}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmBulkPaid && (
         <div className="modal-overlay" onClick={()=>setConfirmBulkPaid(false)}>
           <div className="modal" onClick={e=>e.stopPropagation()}>
             <div style={{fontSize:11,letterSpacing:2,color:"#b45309",marginBottom:12,fontWeight:700}}>MARCAR TODOS COMO PAGADOS</div>
             <div style={{fontSize:15,marginBottom:8,fontWeight:600}}>{meDeben.length} gastos · {fmt(meDebenTotal)}</div>
-            <div style={{fontSize:13,color:"#64748b",marginBottom:24}}>Esto marcara todos los pendientes de cobro como pagados.</div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:24}}>Marca todos los pendientes de cobro como pagados.</div>
             <div style={{display:"flex",gap:8}}>
               <button className="btn btn-amber" style={{flex:1}} onClick={markAllPaid}>Si, todos pagados</button>
               <button className="btn btn-g" onClick={()=>setConfirmBulkPaid(false)}>Cancelar</button>
@@ -419,42 +518,84 @@ export default function App() {
                 <input className="inp" type="number" placeholder="$ Total" value={form.amount}
                   min="0.01" step="0.01" onChange={e=>setForm(f=>({...f,amount:e.target.value}))} required />
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
                 <input className="inp" type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} />
                 <select className="sel" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>
                   <option value="">Sin categoria</option>
                   {CATEGORIES.map(c=><option key={c} value={c}>{CAT_EMOJI[c]||""} {c}</option>)}
                 </select>
               </div>
-              <div style={{background:"#fffbeb",border:"1.5px solid #fde68a",borderRadius:12,padding:"14px 16px",marginBottom:16}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-                  <div style={{fontSize:12,fontWeight:700,color:"#b45309"}}>ME DEBEN</div>
-                  <button type="button" className="btn btn-g btn-sm" onClick={addPerson} style={{fontSize:11}}>+ agregar</button>
-                </div>
-                {form.owed.length===0 && <div style={{fontSize:12,color:"#92400e",opacity:.6}}>Nadie te debe en este gasto.</div>}
-                {form.owed.map((p,i)=>(
-                  <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
-                    <input className="inp" placeholder="Nombre (opcional)" value={p.name}
-                      onChange={e=>updatePerson(i,"name",e.target.value)} style={{flex:2,fontSize:13}} />
-                    <div className="ptt" style={{flexShrink:0,width:80}}>
-                      <button type="button" className={`pto ${p.type==="fixed"?"on":""}`} onClick={()=>updatePerson(i,"type","fixed")}>$</button>
-                      <button type="button" className={`pto ${p.type==="pct"?"on":""}`} onClick={()=>updatePerson(i,"type","pct")}>%</button>
-                    </div>
-                    <input className="inp" type="number" min="0" step="0.01"
-                      placeholder={p.type==="pct"?"50":"25.00"} value={p.value}
-                      onChange={e=>updatePerson(i,"value",e.target.value)} style={{flex:1,fontSize:13}} />
-                    <button type="button" className="btn btn-d btn-sm" style={{padding:"6px 10px"}} onClick={()=>removePerson(i)}>X</button>
-                  </div>
-                ))}
-                {form.owed.length>0 && form.amount && (
-                  <div style={{marginTop:12,display:"flex",gap:16,fontSize:12,paddingTop:10,borderTop:"1px solid #fde68a"}}>
-                    <span style={{color:"#92400e"}}>Cobras: <strong style={{color:"#b45309"}}>{fmt(owedTotalFromForm())}</strong></span>
-                    <span style={{color:"#92400e"}}>Tu parte: <strong style={{color:"#059669"}}>{fmt(Math.max(0,(parseFloat(form.amount)||0)-owedTotalFromForm()))}</strong></span>
+              <input className="inp" placeholder="Nota (opcional)" value={form.note}
+                onChange={e=>setForm(f=>({...f,note:e.target.value}))} style={{marginBottom:14}} />
+
+              <div style={{marginBottom:14}}>
+                <button type="button" onClick={()=>setShowOwed(o=>!o)}
+                  style={{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",color:"#b45309",fontSize:13,fontWeight:600,padding:0}}>
+                  <span style={{width:20,height:20,borderRadius:5,border:"1.5px solid #b45309",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>
+                    {showOwed?"-":"+"}
+                  </span>
+                  Alguien me debe de este gasto
+                </button>
+                {showOwed && (
+                  <div style={{background:"#fffbeb",border:"1.5px solid #fde68a",borderRadius:12,padding:"14px 16px",marginTop:10}}>
+                    {form.owed.length===0 && (
+                      <button type="button" className="btn btn-g btn-sm" onClick={addPerson} style={{fontSize:11,width:"100%"}}>+ agregar persona</button>
+                    )}
+                    {form.owed.map((p,i)=>(
+                      <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+                        <input className="inp" placeholder="Nombre (opcional)" value={p.name}
+                          onChange={e=>updatePerson(i,"name",e.target.value)} style={{flex:2,fontSize:13}} />
+                        <div className="ptt" style={{flexShrink:0,width:80}}>
+                          <button type="button" className={`pto ${p.type==="fixed"?"on":""}`} onClick={()=>updatePerson(i,"type","fixed")}>$</button>
+                          <button type="button" className={`pto ${p.type==="pct"?"on":""}`} onClick={()=>updatePerson(i,"type","pct")}>%</button>
+                        </div>
+                        <input className="inp" type="number" min="0" step="0.01"
+                          placeholder={p.type==="pct"?"50":"25.00"} value={p.value}
+                          onChange={e=>updatePerson(i,"value",e.target.value)} style={{flex:1,fontSize:13}} />
+                        <button type="button" className="btn btn-d btn-sm" style={{padding:"6px 10px"}} onClick={()=>removePerson(i)}>X</button>
+                      </div>
+                    ))}
+                    {form.owed.length>0 && (
+                      <>
+                        <button type="button" className="btn btn-g btn-sm" onClick={addPerson} style={{fontSize:11,marginBottom:8}}>+ agregar otro</button>
+                        {form.amount && (
+                          <div style={{display:"flex",gap:16,fontSize:12,paddingTop:8,borderTop:"1px solid #fde68a"}}>
+                            <span style={{color:"#92400e"}}>Cobras: <strong style={{color:"#b45309"}}>{fmt(owedTotalFromForm())}</strong></span>
+                            <span style={{color:"#92400e"}}>Tu parte: <strong style={{color:"#059669"}}>{fmt(Math.max(0,(parseFloat(form.amount)||0)-owedTotalFromForm()))}</strong></span>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
+
               <button type="submit" className="btn btn-p" style={{width:"100%",padding:"13px"}} disabled={syncing}>
                 {syncing?"Guardando...":editId?"Guardar cambios":"Agregar gasto"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showRecForm && (
+        <div className="overlay" onClick={()=>{setShowRecForm(false);setEditRecId(null);setRecForm(EMPTY_REC);}}>
+          <div className="sheet" onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div style={{fontSize:16,fontWeight:700}}>{editRecId?"Editar gasto fijo":"Nuevo gasto fijo"}</div>
+              <button className="btn btn-g btn-sm" onClick={()=>{setShowRecForm(false);setEditRecId(null);setRecForm(EMPTY_REC);}}>X</button>
+            </div>
+            <form onSubmit={submitRecForm}>
+              <input className="inp" placeholder="Nombre (ej. Netflix)" value={recForm.name}
+                onChange={e=>setRecForm(f=>({...f,name:e.target.value}))} required style={{marginBottom:12}} />
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+                <input className="inp" type="number" placeholder="$ Monto" value={recForm.amount}
+                  min="0.01" step="0.01" onChange={e=>setRecForm(f=>({...f,amount:e.target.value}))} required />
+                <input className="inp" type="number" placeholder="Dia del mes" value={recForm.day}
+                  min="1" max="31" onChange={e=>setRecForm(f=>({...f,day:e.target.value}))} required />
+              </div>
+              <button type="submit" className="btn btn-p" style={{width:"100%",padding:"13px"}} disabled={syncing}>
+                {syncing?"Guardando...":editRecId?"Guardar cambios":"Agregar gasto fijo"}
               </button>
             </form>
           </div>
@@ -478,7 +619,7 @@ export default function App() {
               <span style={{width:7,height:7,borderRadius:"50%",background:statusDot,display:"inline-block"}}></span>
               Sheet
             </div>
-            <button className="btn btn-g btn-sm" onClick={loadSheet} disabled={loading}>
+            <button className="btn btn-g btn-sm" onClick={loadAll} disabled={loading}>
               {loading?"...":"Sync"}
             </button>
           </div>
@@ -523,6 +664,7 @@ export default function App() {
 
         <div style={{display:"flex",background:"#e2e8f0",borderRadius:12,padding:"4px",gap:4,marginBottom:20}}>
           <button className={`nav-tab ${tab==="list"?"on":""}`} style={{flex:1,justifyContent:"center"}} onClick={()=>setTab("list")}>Gastos</button>
+          <button className={`nav-tab ${tab==="recurring"?"on":""}`} style={{flex:1,justifyContent:"center"}} onClick={()=>setTab("recurring")}>Fijos</button>
           <button className={`nav-tab ${tab==="summary"?"on":""}`} style={{flex:1,justifyContent:"center"}} onClick={()=>setTab("summary")}>Resumen</button>
         </div>
 
@@ -618,6 +760,7 @@ export default function App() {
                       {hasOwed && !ex.paid && <span className="badge badge-amber">{(ex.owed||[]).map(p=>p.name||"Alguien").join(", ")} debe {fmt(owedAmt)}</span>}
                       {hasOwed && ex.paid && <span className="badge badge-green">Cobrado {fmt(owedAmt)}</span>}
                     </div>
+                    {ex.note && <div style={{fontSize:11,color:"#94a3b8",marginTop:3,fontStyle:"italic"}}>{ex.note}</div>}
                   </div>
                   <div style={{textAlign:"right",flexShrink:0}}>
                     <div style={{fontSize:16,fontWeight:700}}>{fmt(ex.amount)}</div>
@@ -652,6 +795,36 @@ export default function App() {
             )}
           </>}
         </>}
+
+        {tab==="recurring" && (
+          <div>
+            <div style={{fontSize:12,color:"#64748b",marginBottom:16,lineHeight:1.5}}>
+              Toca el <strong>+</strong> para agregar el cargo al listado de pendientes con la fecha de hoy.
+            </div>
+            {recurring.length===0 && !loading && (
+              <div style={{textAlign:"center",padding:"40px 0",color:"#cbd5e1",fontSize:13}}>Sin gastos fijos aun.</div>
+            )}
+            {recurring.sort((a,b)=>parseInt(a.day)-parseInt(b.day)).map(rec=>(
+              <div key={rec.id} className="rec-row">
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:600}}>{rec.name}</div>
+                  <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>Dia {rec.day} de cada mes</div>
+                </div>
+                <div style={{fontSize:15,fontWeight:700,marginRight:8}}>{fmt(rec.amount)}</div>
+                <button className="btn btn-g btn-sm" style={{padding:"6px 8px",marginRight:4}} onClick={()=>startEditRec(rec)}>E</button>
+                <button className="btn btn-d btn-sm" style={{padding:"6px 8px",marginRight:8}} onClick={()=>setConfirmRecDelete(rec)}>D</button>
+                <button onClick={()=>addRecurringToList(rec)}
+                  style={{width:32,height:32,borderRadius:"50%",background:"#0f4c81",border:"none",color:"#fff",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  +
+                </button>
+              </div>
+            ))}
+            <button className="btn btn-g" style={{width:"100%",marginTop:8,borderStyle:"dashed",fontSize:12,padding:"13px"}}
+              onClick={()=>{setShowRecForm(true);setEditRecId(null);setRecForm(EMPTY_REC);}}>
+              + agregar gasto fijo
+            </button>
+          </div>
+        )}
 
         {tab==="summary" && (
           <div>
@@ -743,8 +916,8 @@ export default function App() {
         )}
       </div>
 
-      {!showForm && tab==="list" && (
-        <button className="fab" onClick={()=>{setEditId(null);setForm(EMPTY_FORM);setShowForm(true);setTimeout(()=>descRef.current?.focus(),200);}}>+</button>
+      {!showForm && !showRecForm && tab==="list" && (
+        <button className="fab" onClick={()=>{setEditId(null);setForm(EMPTY_FORM);setShowOwed(false);setShowForm(true);setTimeout(()=>descRef.current?.focus(),200);}}>+</button>
       )}
 
       {toast && <div className={`toast ${toast.type==="warn"?"twarn":"tok"}`}>{toast.msg}</div>}
