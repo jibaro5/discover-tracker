@@ -151,8 +151,10 @@ const CATEGORIES = ["Comida","Super","Gas","Ocio","Viaje","Salud","Compras","Gas
 const CAT_EMOJI = {"Comida":"🍽️","Super":"🛒","Gas":"⛽","Ocio":"🎬","Viaje":"✈️","Salud":"🏥","Compras":"🛍️","Gastos fijos":"📅","Otro":"📦"};
 function catDisplay(c) {
   if (!c) return "";
-  const key = Object.keys(CAT_EMOJI).find(k => c.toLowerCase() === k.toLowerCase());
-  return key ? `${CAT_EMOJI[key]} ${key}` : c;
+  const trimmed = c.trim();
+  if (CAT_EMOJI[trimmed]) return `${CAT_EMOJI[trimmed]} ${trimmed}`;
+  const key = Object.keys(CAT_EMOJI).find(k => k.toLowerCase() === trimmed.toLowerCase());
+  return key ? `${CAT_EMOJI[key]} ${key}` : trimmed;
 }
 
 const EMPTY_FORM = { desc:"", amount:"", date:today(), category:"", note:"", owed:[] };
