@@ -287,16 +287,6 @@ export default function App() {
     };
     setExpenses(ex=>[expense,...ex]);
     setSyncing(true);
-    try {
-      await sheetAppend(expense);
-      showToast(`${rec.name} agregado`);
-      await loadAll();
-    } catch { showToast("Error al guardar","warn"); }
-    setSyncing(false);
-  }
-    };
-    setExpenses(ex=>[expense,...ex]);
-    setSyncing(true);
     try { await sheetAppend(expense); showToast(`${rec.name} agregado`); }
     catch { showToast("Error al guardar","warn"); }
     setSyncing(false);
