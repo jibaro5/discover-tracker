@@ -151,7 +151,7 @@ const CATEGORIES = ["Comida","Super","Gas","Ocio","Viaje","Salud","Compras","Gas
 const CAT_EMOJI = {"Comida":"🍽️","Super":"🛒","Gas":"⛽","Ocio":"🎬","Viaje":"✈️","Salud":"🏥","Compras":"🛍️","Gastos fijos":"📅","Otro":"📦"};
 function catDisplay(c) {
   if (!c) return "";
-  const key = Object.keys(CAT_EMOJI).find(k => c.toLowerCase().includes(k.toLowerCase()));
+  const key = Object.keys(CAT_EMOJI).find(k => c.toLowerCase() === k.toLowerCase());
   return key ? `${CAT_EMOJI[key]} ${key}` : c;
 }
 
