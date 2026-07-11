@@ -272,8 +272,7 @@ export default function App() {
     setShowOwed(false);
     setShowForm(false);
   }
-
-  async function addRecurringToList(rec) {
+ async function addRecurringToList(rec) {
     const expense = {
       id: Date.now(),
       sheetId: null,
@@ -285,6 +284,16 @@ export default function App() {
       owed: [],
       added: false,
       paid: false,
+    };
+    setExpenses(ex=>[expense,...ex]);
+    setSyncing(true);
+    try {
+      await sheetAppend(expense);
+      showToast(`${rec.name} agregado`);
+      await loadAll();
+    } catch { showToast("Error al guardar","warn"); }
+    setSyncing(false);
+  }
     };
     setExpenses(ex=>[expense,...ex]);
     setSyncing(true);
