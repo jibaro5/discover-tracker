@@ -21,6 +21,8 @@ export default async function handler(req, res) {
       if (body.id !== undefined) params.set("id", String(body.id));
       if (body.added !== undefined) params.set("added", String(body.added));
       if (body.paid !== undefined) params.set("paid", String(body.paid));
+      if (body.name !== undefined) params.set("name", String(body.name));
+      if (body.day !== undefined) params.set("day", String(body.day));
     }
     const response = await fetch(`${SCRIPT_URL}?${params.toString()}`, {
       method: "GET",
